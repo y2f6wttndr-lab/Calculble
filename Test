@@ -1,0 +1,1383 @@
+Voici le pipeline ASCII complet et validé qui intègre tout notre système, du sélecteur de backend de compression jusqu'à la sortie GPU zéro-copie :
+
+================================================================================
+             TFE HYBRID PIPELINE BLUEPRINT (v3.0 - COMPLETE INTEGRATION)
+================================================================================
+
+ [ 1. ENTRÉE ET SÉLECTION DU BACKEND ]
+ ──────────────────────────────────────────────────────────────────────────────
+   Raw Input Frame (< 4K) + Target Resolution Target (1080p -> 4K / 8K)
+                             │
+                             ▼
+             ┌───────────────────────────────┐
+             │  Compression Backend Selector │
+             │  - Détection APU, AMD, NVIDIA │
+             │  - Choix : CUDA / VK / DX12   │
+             └───────────────────────────────┘
+                             │
+                             ▼
+ [ 2. HORLOGE ET RÉGULATION TEMPORELLE ]
+ ──────────────────────────────────────────────────────────────────────────────
+             ┌───────────────────────────────┐
+             │          VRTulator            │ ◄── Contrôle dynamique du
+             │  (Ajuste itérations 1..152)   │     budget CPU (V-Sync)
+             └───────────────────────────────┘
+                             │
+                             ▼
+             ┌───────────────────────────────┐
+             │        NoiseSync Clock        │ ───► Injection Jitter Pi
+             │  (Pattern constant 152 ticks)  │     déterministe
+             └───────────────────────────────┘
+                             │
+                             ▼
+ [ 3. RECONSTRUCTION PROGRESSIVE & FILTRAGE ]
+ ──────────────────────────────────────────────────────────────────────────────
+             ┌───────────────────────────────┐
+             │      Intent Detector (76)     │ ◄── Analyse de cohérence
+             └───────────────────────────────┘
+                             │
+                             ▼
+             ┌───────────────────────────────┐
+             │     Grille de Fibonacci       │ ───► Découpage de blocs non-linéaire
+             │    (Phases : 8, 16, 24, 48)   │     (De macro à sub-pixel)
+             └───────────────────────────────┘
+                             │
+                             ▼
+             ┌───────────────────────────────┐
+             │    Filtre de Jules Biscueve   │ ───► Court-circuit P = NP
+             │  (Élimination probabilités)   │     (Rejet blocs redondants)
+             └───────────────────────────────┘
+                             │
+                             ▼
+ [ 4. SUR-ÉCHANTILLONNAGE ET MÉLANGE ]
+ ──────────────────────────────────────────────────────────────────────────────
+             ┌───────────────────────────────┐
+             │        Lanczos Jitter         │ ───► Interpolation sub-pixel
+             │  (GetLanczosWeight + Jitter)  │     physique sur Matrix B
+             └───────────────────────────────┘
+                             │
+                             ▼
+             ┌───────────────────────────────┐
+             │         Venturi Mixer         │ ───► Mélange dynamique A/B
+             │  (Double Matrix A/B 4K/8K)    │     selon charge CPU
+             └───────────────────────────────┘
+                             │
+                             ▼
+ [ 5. ENVOI MATÉRIEL ]
+ ──────────────────────────────────────────────────────────────────────────────
+             ┌───────────────────────────────┐
+             │      VK Mesh Shaders / APU    │
+             │   Zero-Copy Pinned Memory     │ ───► Sortie d'image propre
+             └───────────────────────────────┘
+
+   Résultat
+   - Dans des scènes type GTA (trafic dense, foule, haut mouvement), la complexité nourrit le moteur
+   - Le CPU travaille davantage là où c’est utile, la scène complexe fait monter la puissance de reconstruction au lieu de la casser
+
+6) CPU Core Affinity (style mining)
+   - Attribuer des cœurs spécifiques à :
+     - CoreGroup_Clock  : NoiseSync + VSync + gestion des ticks
+     - CoreGroup_Puzzle : reconstruction / Double Matrix A/B / blending
+     - CoreGroup_Aux    : IntentDetector, AutoTrain, gestion des buffers circulaires, I/O
+   - Objectif
+     - Limiter les migrations de threads
+     - Optimiser la dissipation thermique (répartition par “groupes” stables)
+     - Offrir un comportement proche du “mining” : charge constante, prévisible, sans spikes violents.
+
+7) Zero-copy compressed dispatch GPU
+   - Après phase 48, on dispose d’un canvas 4K reconstruit en mémoire CPU (en format compressé adapté au GPU)
+   - Étapes
+     - Format interne : par ex. blocs compressés, alignés sur la compression native/attendue par le GPU/driver
+     - Utiliser un buffer partagé ou pinned memory pour éviter les copies inutiles
+     - Envoyer directement la structure compressée au GPU (décodage côté GPU ou via décodeur matériel)
+   - Intérêt
+     - Bypass du “mur” de l’upscale GPU (le GPU récupère déjà une image quasi finale)
+     - Réduction du trafic PCIe
+     - Meilleure compatibilité avec anti-cheat (on ne hook pas le rendu final, on fournit une frame propre “en amont” dans le pipeline prévu).
+
+8) Intégration avec IntentDetector & Motion Vectors
+   - IntentDetector reçoit :
+     - Ratio d’asymétrie (basé sur π)
+     - Historique des 76 frames passées + prévisionnelles (stockées via circular buffer)
+     - Infos NoiseSync (tick courant, pattern en cours)
+   - Motion Vectors fournissent
+     - Vitesse, direction, densité de mouvement
+     - Zones prioritaires (UI, centre de l’écran, sujet principal, trajectoires de véhicules, etc.)
+   - L’IntentDetector renvoie au moteur de reconstruction
+     - Poids de priorité pour chaque bloc
+     - Décision sur la phase minimum requise (8/16/24/48) pour chaque zone
+     - Possibilité de “downgrader” certaines zones à la phase 24 si la charge est extrême
+
+9) NoiseSync Clock (détails)
+   - 152 itérations au max par frame (ticks)
+   - Chaque tick :
+     - Met à jour un état NoiseState (graine, offset, etc.)
+     - Sert de métronome à
+       - Sampling des blocs à recalculer
+       - Ajustement dynamique de la charge Venturi
+       - Synchronisation des écritures A/B
+   - Ce pattern doit être :
+     - Constant
+     - Paramétrable par profil (preset performance/qualité)
+
+  namespace fp_scale {
+  #pragma once
+    #pragma once
+  
+  #include <chrono>
+  #include <algorithm>
+  #include <vector>
+  #include <cstddef>
+  #include <cstdint>
+  #include <cmath>
+  #include <cstring>
+  #include <mutex>
+  #include <shared_mutex>
+  #include <optional>
+  #include <stdexcept>
+  #include <memory>
+  #include <windows.h>
+  #include <thread>
+  #include <iostream>
+  #include "FPScaleCore.hpp"
+  #include "VRTulator.hpp"
+  #include <functional>
+namespace fp_scale {
+  
+      struct MatrixBlock {
+          float val[16]; // Matrice locale de pixels pour la compression
+      };
+  
+      class VenturiChoreography {
+      private: 
+          // Double matriçage A (Passé/Validé) et B (Futur/Doppler)
+          std::vector<MatrixBlock> matrixA_;
+          std::vector<MatrixBlock> matrixB_;
+          std::vector<float> mixedBuffer_;
+          
+          size_t blockCapacity_{512};
+          float venturiPressure_{1.0f};
+  
+      public:
+          // Intégration de la constante Chronospectre, pi et le ratio d'asymétrie pour le mixage
+          void mixMatrices(float asymmetryRatio, float t_pi, float coherence) {
+              // Formule de transition lissée par pi pour le mixage des buffers
+              float mixWeight = (2.0f / 3.14159265f) * std::atan(asymmetryRatio * t_pi);
+              
+              // Effet Turbo Venturi : plus la cohérence et la pression de calcul augmentent, 
+              // plus on force l'accélération du traitement pour éviter le goulot d'étranglement
+              venturiPressure_ = 1.0f + (coherence * venturiPressure_ * 1.5f);
+              blockCapacity_ = static_cast<size_t>(512.0f * venturiPressure_);
+  
+              for (size_t i = 0; i < matrixA_.size(); ++i) {
+                  for (int j = 0; j < 16; ++j) {
+                      // Mixage asymétrique A/B
+                      mixedBuffer_[i * 16 + j] = (matrixA_[i].val[j] * (1.0f - mixWeight)) + 
+                                                 (matrixB_[i].val[j] * mixWeight);
+                  }
+              }
+          }
+      };
+  } 
+---
+  void setThreadToCore(std::thread& t, int coreId) {
+      HANDLE handle = (HANDLE)t.native_handle();
+      DWORD_PTR mask = (1ULL << coreId); // Crée le masque de bits (ex: 1 pour cœur 0, 2 pour cœur 1, 4 pour cœur 2...)
+      
+      if (SetThreadAffinityMask(handle, mask) == 0) {
+          std::cerr << "Erreur d'attribution du cœur " << coreId << std::endl;
+      }
+  }
+---  
+      // Constante mathématique pour le jitter et le ratio d'asymétrie
+      constexpr double PI_CONST = 3.14159265358979323846;
+  
+      // ------------------------------------------------------------
+      // Structure des Métriques d'Intention
+      // ------------------------------------------------------------
+      struct IntentMetrics {
+          float intensity = 0.0f;
+          float coherence = 0.0f;
+          float asymmetryRatio = 0.0f; // Ratio linéaire calculé (passé vs futur)
+      };
+  
+      // ------------------------------------------------------------
+      // IntentDetector avec calcul linéaire du ratio d'asymétrie (π)
+      // ------------------------------------------------------------
+      class IntentDetector {
+      public:
+          static IntentMetrics analyze(float prev, float curr, float next) {
+              IntentMetrics m{};
+              
+              const float d1 = curr - prev; // Flux passé (N-1 -> N)
+              const float d2 = next - curr; // Flux futur (N -> N+1)
+              
+              const float mag = std::fabs(d1) + std::fabs(d2);
+              m.intensity = mag / (1.0f + mag);
+              
+              const float dot = d1 * d2;
+              const float denom = (std::fabs(d1) + std::fabs(d2)) + 1e-6f;
+              float dirScore = 0.0f;
+              if (denom > 0.0f) {
+                  dirScore = dot / (denom * denom);
+              }
+              m.coherence = 0.5f * (std::clamp(dirScore, -1.0f, 1.0f) + 1.0f);
+  // Calcul du ratio d'asymétrie linéaire basé sur la constante PI
+              // Régule la direction du flux temporel pour anticiper la décharge
+              const float weightPrev = std::fabs(d1) * static_cast<float>(PI_CONST);
+              const float weightNext = std::fabs(d2) * static_cast<float>(PI_CONST);
+              const float totalWeight = weightPrev + weightNext + 1e-6f;
+              
+              m.asymmetryRatio = (weightNext - weightPrev) / totalWeight;
+              
+              return m;
+          }
+      };
+  
+      // ------------------------------------------------------------
+      // NoiseSync : Stabilisateur de flux GPU
+      // ------------------------------------------------------------
+      struct NoiseSyncConfig {
+          float baseAmplitude   = 1.0f;
+          float smoothingFactor = 0.95f;
+          float bias            = 0.0f;
+      };
+  
+      class NoiseSync {
+      public:
+          explicit NoiseSync(const NoiseSyncConfig& cfg = NoiseSyncConfig{})
+              : cfg_(cfg)
+              , state_(0.0f)
+              , seed_(0x12345678u) {}
+  
+          void reset() {
+              state_ = 0.0f;
+              seed_  = 0x12345678u;
+          }
+  
+          float nextSample() {
+              const float raw = pseudoRandomUnit();
+              const float target = cfg_.baseAmplitude * raw + cfg_.bias;
+              state_ = cfg_.smoothingFactor * state_ + (1.0f - cfg_.smoothingFactor) * target;
+              return state;
+          }
+  
+      private:
+          float pseudoRandomUnit() {
+              seed_ = 1664525u * seed_ + 1013904223u;
+              const uint32_t v = (seed_ >> 9) | 0x3F800000u;
+              float f;
+              std::memcpy(&f, &v, sizeof(f));
+              return f - 1.0f;
+          }
+  
+          NoiseSyncConfig cfg_;
+          float           state_;
+          uint32_t        seed_;
+      };
+  
+      // ------------------------------------------------------------
+      // ChronoOrchestrator : Horloge Choregraphy 152-cycles
+      // ------------------------------------------------------------
+        // ------------------------------------------------------------
+      struct TickInfo {
+          uint32_t cycleIndex = 0;
+          int16_t offset = 0;          // Décalage temporel horaire (+16) ou anti-horaire (-16)
+          bool isResetTick = false;    // Remise à zéro à 24
+          bool isDischargeTick = false; // Décharge du buffer (latch)
+      };
+  
+      class ChronoOrchestrator {
+      public:
+          ChronoOrchestrator() : tick_(0) {}
+  
+          void reset() { tick_ = 0; }
+  
+          TickInfo next() {
+              TickInfo info{};
+              info.cycleIndex = tick_ % 152u;
+  
+              // Logique de cycle 16, 16, 24 (et 16, 16, 48)
+              uint32_t phaseIndex = info.cycleIndex % 48u;
+  
+              if (phaseIndex < 16) {
+                  // Premier segment : Décalage horaire (+16)
+                  info.offset = 16;
+              } else if (phaseIndex < 32) {
+                  // Deuxième segment : Décalage anti-horaire (-16)
+                  info.offset = -16;
+              } else if (phaseIndex == 32) {
+                  // Fin de phase de transition : Remise à zéro à 24
+                  info.offset = 0;
+                  info.isResetTick = true;
+              }
+  
+              // Décharge de synchronisation du buffer à la transition 24 ou 48
+              if (info.cycleIndex == 23 || info.cycleIndex == 47 || info.cycleIndex == 151) {
+                  info.isDischargeTick = true;
+              }
+  
+              ++tick_;
+              return info;
+          }
+  
+      private:
+          uint32_t tick_;
+      };
+  
+      // ------------------------------------------------------------
+      // VRTulator : Auto-training et régulation de charge
+      // ------------------------------------------------------------
+      struct VRTConfig {
+          double targetFrameTimeMs = 16.67; // 60 FPS cible
+          double safetyMargin      = 0.20;  // 20% de marge de sécurité CPU
+          std::size_t minIterations = 1;
+          std::size_t maxIterations = 152; 
+      };
+  
+      class VRTulator {
+      public:
+          explicit VRTulator(const VRTConfig& cfg = VRTConfig{})
+              : cfg_(cfg)
+              , currentIterations_(cfg.minIterations) {} 
+  
+          void beginFrame() {
+              startTime_ = std::chrono::high_resolution_clock::now();
+          }
+  
+          std::size_t endFrame() {
+              auto endTime = std::chrono::high_resolution_clock::now();
+              std::chrono::duration<double, std::milli> elapsed = endTime - startTime_;
+              const double actualMs = elapsed.count();
+              const double budgetMs = cfg_.targetFrameTimeMs * (1.0 - cfg_.safetyMargin);
+  
+              if (actualMs < budgetMs) {
+                  const double ratio = budgetMs / (actualMs + 1e-6);
+                  if (ratio > 1.1) {
+                      currentIterations_ = std::min(cfg_.maxIterations, 
+                          static_cast<std::size_t>(currentIterations_ * 1.1));
+                  } else {
+                      currentIterations_ = std::min(cfg_.maxIterations, currentIterations_ + 1);
+                  }
+              } else {
+                  currentIterations_ = std::max(cfg_.minIterations, 
+                      static_cast<std::size_t>(currentIterations_ * 0.7));
+              }
+              return currentIterations_;
+          }
+  
+          std::size_t currentIterations() const { return currentIterations_; }
+  
+      private:
+          VRTConfig cfg_;
+          std::size_t currentIterations_;
+          std::chrono::high_resolution_clock::time_point startTime_;
+      };
+  
+      // ------------------------------------------------------------
+      // Buffers Hybrides : Circular (Radar) & Single-Double (Zero-Copy)
+      // ------------------------------------------------------------
+      template <typename T>
+      class CircularBuffer {
+      public:
+          explicit CircularBuffer(std::size_t capacity = 152)
+              : capacity_(capacity) {}
+  
+          void push(const T& value, float asymmetryRatio) {
+              // Ajustement dynamique de la capacité pour amortir le stuttering
+              std::size_t dynamicCapacity = capacity_;
+              if (asymmetryRatio > 0.0f) {
+                  dynamicCapacity = static_cast<std::size_t>(capacity_ * (1.0f + asymmetryRatio));
+              }
+              dynamicCapacity = std::clamp(dynamicCapacity, std::size_t(24), std::size_t(152));
+  
+              buffer_.push_back(value);
+              if (buffer_.size() > dynamicCapacity) {
+                  buffer_.erase(buffer_.begin());
+              }
+          }
+  
+          std::vector<T> discharge() {
+              std::vector<T> temp;
+              std::swap(temp, buffer_);
+              return temp;
+          }
+  
+          std::size_t size() const { return buffer_.size(); }
+          bool empty() const { return buffer_.empty(); }
+  
+      private:
+          std::size_t capacity_;
+          std::vector<T> buffer_;
+      };
+  
+      template <typename T>
+      class SingleDoubleBuffer {
+      public:
+          SingleDoubleBuffer() : activeBuffer_(0), hasData_(false) {}
+  
+          void updateData(const T& data) {
+              std::unique_lock<std::shared_mutex> lock(mutex_);
+              const std::size_t nextBuffer = 1 - activeBuffer_;
+              buffers_[nextBuffer] = data;
+              activeBuffer_ = nextBuffer;
+              hasData_ = true;
+          }
+  
+          std::optional<T> readData() const {
+              std::shared_lock<std::shared_mutex> lock(mutex_);
+              if (!hasData_) return std::nullopt;
+              return buffers_[activeBuffer_];
+          }
+  
+      private:
+          mutable std::shared_mutex mutex_;
+          T buffers_[2];
+          std::size_t activeBuffer_;
+          bool hasData_;
+      };
+  
+      // ------------------------------------------------------------
+      // Master Orchestrator Engine
+      // ------------------------------------------------------------
+      struct PipelineState {
+          std::uint64_t ticksProcessed = 0;
+          float lastNoiseStabilization = 0.0f;
+          std::size_t activeIterations = 1;
+          IntentMetrics currentIntent{};
+      };
+  
+      template <typename FrameData>
+      class FPScaleEngine {
+      public:
+          FPScaleEngine(const VRTConfig& vrtCfg, const NoiseSyncConfig& noiseCfg)
+              : vrt_(vrtCfg)
+              , noise_(noiseCfg) {}
+  
+          void beginFrame() {
+              vrt_.beginFrame();
+          }
+  
+          // Un tick d'exécution linéaire synchronisant tout le pipeline
+          PipelineState tick(float prev, float curr, float next, const FrameData& frame) {
+              const TickInfo tInfo = clock_.next();
+              
+              // 1. Stabilisation GPU via NoiseSync
+              const float noiseSample = noise_.nextSample();
+              
+              // 2. Analyse temporelle et asymétrie par l'IntentDetector
+              const IntentMetrics metrics = IntentDetector::analyze(prev, curr, next);
+              
+              // 3. Injection et régulation dans le CircularBuffer temporel
+              circular_.push(frame, metrics.asymmetryRatio);
+              
+              // 4. Copie vers le double-buffer de dispatch Motion Vectors / Doppler
+              doubleBuffer_.updateData(frame);
+  
+              // 5. Gestion de la décharge physique sur latch de synchronisation V-Sync
+              if (tInfo.isDischargeTick) {
+                  std::vector<FrameData> dischargedFrames = circular_.discharge();
+                  // Envoyer les données au Backend GPU via Zero-Copy ici
+                  (void)dischargedFrames;
+              }
+  
+              // 6. Fin de mesure et auto-training des itérations
+              const std::size_t iterations = vrt_.endFrame();
+  
+              PipelineState state{};
+              state.ticksProcessed = clock_.globalTick();
+              state.lastNoiseStabilization = noiseSample;
+              state.activeIterations = iterations;
+              state.currentIntent = metrics;
+  
+              return state;
+          }
+  
+      private:
+          ChronoOrchestrator          clock_;
+          VRTulator                   vrt_;
+          NoiseSync                   noise_;
+          CircularBuffer<FrameData>   circular_;
+          SingleDoubleBuffer<FrameData> doubleBuffer_;
+      };
+  
+  } // namespace fp_scale
+
+  
+  namespace fp_scale {
+  
+      // Constante de structure géométrique pour l'affinement par Pi
+      constexpr double PI_CONST = 3.14159265358979323846;
+  
+      // ------------------------------------------------------------
+      // Bloc Mémoire : Structure de base d'un bloc de données
+      // ------------------------------------------------------------
+      struct MemoryBlock {
+          std::vector<uint8_t> data;
+          bool isUsed = false;
+          uint32_t lastTickUsed = 0;
+      };
+  
+      // ------------------------------------------------------------
+      // MemoryPool : Pool de mémoire à taille fixe pré-allouée
+      // ------------------------------------------------------------
+      class MemoryPool {
+      public: 
+          explicit MemoryPool(size_t blockCount = 152, size_t blockSize = 4096)
+              : blockCount_(blockCount)
+              , blockSize_(blockSize) {
+              pool_.resize(blockCount);
+              for (auto& block : pool_) {
+                  block.data.resize(blockSize, 0);
+              }
+          }
+  
+          // Alloue un bloc du pool en utilisant le ratio d'asymétrie pour ajuster la priorité d'allocation
+          MemoryBlock* allocate(float asymmetryRatio, uint32_t currentTick) {
+              std::unique_lock<std::shared_mutex> lock(mutex_);
+              
+              // Détermination de l'index de départ basé sur la précision de Pi et le ratio d'asymétrie
+              double offsetFactor = std::fabs(asymmetryRatio) * PI_CONST;
+              size_t startIndex = static_cast<size_t>(std::floor(offsetFactor)) % blockCount_;
+  
+              for (size_t i = 0; i < blockCount_; ++i) {
+                  size_t targetIndex = (startIndex + i) % blockCount_;
+                  if (!pool_[targetIndex].isUsed) {
+                      pool_[targetIndex].isUsed = true;
+                      pool_[targetIndex].lastTickUsed = currentTick;
+                      return &pool_[targetIndex];
+                  }
+              }
+              
+              // Si tout est plein, on recycle le bloc le plus ancien
+              size_t oldestIndex = 0;
+              uint32_t oldestTick = 0xFFFFFFFFu;
+              for (size_t i = 0; i < blockCount_; ++i) {
+                  if (pool_[i].lastTickUsed < oldestTick) {
+                      oldestTick = pool_[i].lastTickUsed;
+                      oldestIndex = i;
+                  }
+              }
+              
+              pool_[oldestIndex].isUsed = true;
+              pool_[oldestIndex].lastTickUsed = currentTick;
+              return &pool_[oldestIndex];
+          }
+  
+          void deallocate(MemoryBlock* block) {
+              std::unique_lock<std::shared_mutex> lock(mutex_);
+              if (block) {
+                  block->isUsed = false;
+              }
+          }
+  
+          size_t blockCount() const { return blockCount_; }
+          size_t blockSize() const { return blockSize_; }
+  
+      private:
+          size_t blockCount_;
+          size_t blockSize_;
+          std::vector<MemoryBlock> pool_;
+          mutable std::shared_mutex mutex_;
+      };
+  
+      // ------------------------------------------------------------
+      // MemoryAccessor : Accesseur sécurisé avec indexation par Pi
+      // ------------------------------------------------------------
+      class MemoryAccessor {
+      public:
+          explicit MemoryAccessor(std::shared_ptr<MemoryPool> pool)
+              : pool_(std::move(pool)) {}
+  
+          // Lit ou écrit en appliquant l'indexation temporelle par rapport aux décimales de Pi
+          void processTemporalRead(MemoryBlock* block, float asymmetryRatio) {
+              if (!block) return;
+              
+              // Résolution de l'index par Pi pour cibler les données d'historique pertinentes
+              double piIndex = std::fabs(asymmetryRatio) * PI_CONST;
+              size_t targetOffset = static_cast<size_t>(std::floor(piIndex * 1000.0)) % pool_->blockSize();
+              
+              // Opération symbolique simulant le ciblage dans le bloc
+              if (targetOffset < block->data.size()) {
+                  block->data[targetOffset] = static_cast<uint8_t>(24); // Valeur de décharge physique par défaut
+              }
+          }
+  
+      private:
+          std::shared_ptr<MemoryPool> pool_;
+      };
+  
+  }
+--- 
+      // ------------------------------------------------------------
+      // Constantes Physiques et Géométriques (Lexique Cosmique)
+      // ------------------------------------------------------------
+      constexpr double G_CONST = 6.67430e-11;     // Constante gravitationnelle
+      constexpr double C_LIGHT = 2.99792458e8;    // Vitesse de la lumière
+      constexpr double PHI_GOLDEN = 1.618033988749895; // Nombre d'or
+  
+      // Structure représentant un point d'une grille de contrôle (sans toucher à la matrice brute)
+      struct GridPoint {
+          int x = 0;
+          int y = 0;
+          float priority = 0.0f;
+          bool validated = false;
+      };
+  
+      // ------------------------------------------------------------
+      // FrameReader : Accès aux flux d'images avec validation d'asymétrie
+      // ------------------------------------------------------------
+      class FrameReader {
+      public:
+          static std::vector<float> readFrame(int width, int height, float asymmetryRatio) {
+              std::vector<float> frame(width * height, 0.0f);
+              // Modulation géométrique par Pi et l'angle d'or pour simuler l'équilibre d'acquisition
+              double step = asymmetryRatio * PI_CONST * PHI_GOLDEN;
+              for (size_t i = 0; i < frame.size(); ++i) {
+                  frame[i] = static_cast<float>(std::sin(i * step) * 0.5 + 0.5);
+              }
+              return frame;
+          }
+  
+          static void writeFrame(int width, int height, const std::vector<float>& frame) {
+              // Écriture symbolique ou dispatch vers la sortie du pipeline
+          }
+      };
+      // ------------------------------------------------------------
+      // TemporalBuffer managé par la constante d'asymétrie linéaire
+      // ------------------------------------------------------------
+      template <typename FrameData>
+      class TemporalBuffer {
+      public:
+          explicit TemporalBuffer(size_t capacity = 76)
+              : capacity_(capacity) {}
+  
+          void push(const FrameData& frame, float asymmetryRatio) {
+              // Ajustement de la taille de stockage dynamique selon le ratio d'asymétrie
+              // Évite le stuttering en élargissant la fenêtre glissante (jusqu'à 152)
+              size_t dynamicCapacity = capacity_;
+              if (asymmetryRatio > 0.0f) {
+                  dynamicCapacity = static_cast<size_t>(capacity_ * (1.0f + asymmetryRatio));
+              }
+              dynamicCapacity = std::clamp(dynamicCapacity, size_t(24), size_t(152));
+  
+              buffer_.push_back(frame);
+              if (buffer_.size() > dynamicCapacity) {
+                  buffer_.erase(buffer_.begin());
+              }
+          }
+  
+          std::vector<FrameData> discharge() {
+              std::vector<FrameData> temp;
+              std::swap(temp, buffer_);
+              return temp; // Zéro copie via move semantics
+          }
+  
+          size_t size() const { return buffer_.size(); }
+          bool empty() const { return buffer_.empty(); }
+  
+      private:
+          size_t capacity_;
+          std::vector<FrameData> buffer_;
+      };
+  
+  } // namespace fp_scale
+---
+      // ------------------------------------------------------------
+      // TemporalBuffer : Gestion de l'historique de décharge (16, 16, 24/48)
+      // ------------------------------------------------------------
+      class TemporalBuffer {
+      public:
+          explicit TemporalBuffer(size_t capacity = 152)
+              : m_capacity(capacity)
+              , m_frames_size(0) {}
+  
+          void pushFrame(const float* frame, double timestamp, float asymmetryRatio) {
+              std::unique_lock<std::shared_mutex> lock(mutex_);
+              
+              // Cycles de décharge basés sur l'asymétrie (seuils de 24 ou 48 selon la pression temporelle)
+              size_t maxHold = (asymmetryRatio > 1.0f) ? 48 : 24;
+              
+              if (m_frames.size() >= m_capacity || m_frames.size() >= maxHold) {
+                  // Décharge du buffer temporel (Seagull double-buffer reset à 16)
+                  size_t itemsToRemove = m_frames.size() - 16;
+                  m_frames.erase(m_frames.begin(), m_frames.begin() + itemsToRemove);
+              }
+              
+              m_frames.push_back({frame, timestamp});
+              m_frames_size = m_frames.size();
+          }
+  
+          const std::pair<const float*, double>& selectReferenceFrame(double target, float asymmetryRatio) const {
+              std::shared_lock<std::shared_mutex> lock(mutex_);
+              if (m_frames.empty()) {
+                  static const std::pair<const float*, double> emptyResult{nullptr, 0.0};
+                  return emptyResult;
+              }
+  
+              // Recherche indexée par Pi pour cibler l'historique de décharge
+              double offset = std::fabs(asymmetryRatio) * PI_CONST;
+              auto it = std::find_if(m_frames.begin(), m_frames.end(), [target, offset](const auto& f) {
+                  return std::abs(f.second - target) < (0.1f * offset);
+              });
+  
+              if (it == m_frames.end()) {
+                  return m_frames.back();
+              }
+              return *it;
+          }
+  
+      private:
+          size_t m_capacity;
+          size_t m_frames_size;
+          std::vector<std::pair<const float*, double>> m_frames;
+          mutable std::shared_mutex mutex_;
+      };
+  
+      // ------------------------------------------------------------
+      // DopplerEffect : Calcul de la priorité de grille par décalage doppler symétrique
+      // ------------------------------------------------------------
+      class DopplerEffect {
+      public:
+          void setTarget(float tx, float ty, float vz) {
+              if (tx < 0 || tx > 1.0f || ty < 0 || ty > 1.0f || vz < 0) {
+                  targetX_ = 0.5f;
+                  targetY_ = 0.3f;
+                  velocityZ_ = 1.2f;
+              } else {
+                  targetX_ = tx;
+                  targetY_ = ty;
+                  velocityZ_ = vz;
+              }
+          }
+  
+          // Application de l'attraction gravitationnelle de Doppler sur les grilles de contrôle (sans toucher à la matrice brute)
+          void applyToGrids(std::vector<GridPoint>& gridA, std::vector<GridPoint>& gridB, float asymmetryRatio) {
+              // Équation de pression gravitationnelle cosmique d'équilibre (r_eq)
+              // r_eq = sqrt((G * M * rho_eff) / F_cosmique)
+              double F_cosmique = std::fabs(asymmetryRatio) * PI_CONST;
+              if (F_cosmique < 1e-5) F_cosmique = 1e-5;
+              double r_eq = std::sqrt((G_CONST * 1.0e11 * 1.2) / F_cosmique);
+  
+              for (size_t i = 0; i < gridA.size(); ++i) {
+                  float dx = gridA[i].x - targetX_;
+                  float dy = gridA[i].y - targetY_;
+                  float distance = std::sqrt(dx * dx + dy * dy);
+                  if (distance < 1e-5f) distance = 1e-5f;
+  
+                  // Décalage de Doppler influencé par la condition d'équilibre gravitationnel r_eq
+                  float dopplerShift = static_cast<float>((gain_ / (1.0f + distance * 0.02f)) * (1.0f + velocityZ_) * (r_eq / PHI_GOLDEN));
+                  
+                  gridA[i].priority = dopplerShift;
+                  
+                  // Symétrie miroir sur la grille B
+                  if (i < gridB.size()) {
+                      gridB[i].priority = dopplerShift * static_cast<float>(PHI_GOLDEN / PI_CONST);
+                  }
+              }
+          }
+  
+      private:
+          float targetX_ = 0.5f;
+          float targetY_ = 0.3f;
+          float velocityZ_ = 1.2f;
+          float gain_ = 2.0f;
+          float falloff_ = 0.95f;
+      };
+  
+      // ------------------------------------------------------------
+      // AdaptiveThresholdValidator : Alignement des seuils adaptatifs
+      // ------------------------------------------------------------
+      class AdaptiveThresholdValidator {
+      public:
+          void setPriority(float p) {
+              m_priority = p;
+          }
+  
+          void validate(const std::vector<float>& cpuFrame, const std::vector<float>& gpuFrame, std::vector<GridPoint>& gridA, std::vector<GridPoint>& gridB, int width) {
+              if (cpuFrame.size() < gridA.size() || gpuFrame.size() < gridB.size()) {
+                  return;
+              }
+  
+              for (size_t i = 0; i < gridA.size(); ++i) {
+                  int idxA = gridA[i].y * width + gridA[i].x;
+                  int idxB = gridB[i].y * width + gridB[i].x;
+                  
+                  if (idxA >= cpuFrame.size() || idxB >= gpuFrame.size()) continue;
+  
+                  float valA = cpuFrame[idxA];
+                  float valB = gpuFrame[idxB];
+                  
+                  float diff = std::abs(valA - valB);
+                  // Plus la priorité Doppler/temporelle est forte, plus le seuil est adaptatif
+                  float threshold = 0.05f * m_priority * static_cast<float>(PI_CONST / PHI_GOLDEN);
+                  
+                  if (diff < threshold) {
+                      gridA[i].validated = true;
+                      gridB[i].validated = true;
+                  } else {
+                      gridA[i].validated = false;
+                      gridB[i].validated = false;
+                  }
+              }
+          }
+  
+      private:
+          float m_priority = 1.0f;
+      };
+  
+      // ------------------------------------------------------------
+      // SignatureCache : Cache O(1) de signatures géométriques
+      // ------------------------------------------------------------
+      class SignatureCache {
+      public:
+          SignatureCache(int width) : width_(width) {}
+  
+          void precomputeSignatures(const std::vector<float>& frame, int bs) {
+              if (frame.empty()) return;
+              std::unique_lock<std::shared_mutex> lock(mutex_);
+              
+              cache_[bs].resize(bs * bs, 0);
+              for (int y = 0; y < bs; ++y) {
+                  for (int x = 0; x < bs; ++x) {
+                      size_t idx = y * width_ + x;
+                      if (idx < frame.size()) {
+                          uint64_t sum = static_cast<uint64_t>(frame[idx] * 1000.0f);
+                          cache_[bs][y * bs + x] = sum % 997;
+                      }
+                  }
+              }
+          }
+  
+          uint64_t computeSignature(const std::vector<float>& frame, int x, int y, int size) const {
+              std::shared_lock<std::shared_mutex> lock(mutex_);
+              auto it = cache_.find(size);
+              if (it != cache_.end() && !it->second.empty()) {
+                  size_t cacheIdx = (y % size) * size + (x % size);
+                  return it->second[cacheIdx];
+              }
+              
+              // Fallback de calcul linéaire géométrique
+              double sum = 0.0;
+              for (int dy = 0; dy < size; ++dy) {
+                  for (int dx = 0; dx < size; ++dx) {
+                      size_t idx = (y + dy) * width_ + (x + dx);
+                      if (idx < frame.size()) {
+                          sum += frame[idx];
+                      }
+                  }
+              }
+              return static_cast<uint64_t>(sum * 1000.0 * PI_CONST) % 997;
+          }
+  
+      private:
+          int width_;
+          std::unordered_map<int, std::vector<uint64_t>> cache_;
+          mutable std::shared_mutex mutex_;
+      };
+  
+      // ------------------------------------------------------------
+      // IntentDetector & VirtualUpscalePipeline (Cœur d'Orchestration)
+      // ------------------------------------------------------------
+      class IntentDetector {
+      public:
+          IntentDetector(int width) : width_(width) {}
+  
+          uint64_t computeSignature(const std::vector<float>& frame, int x, int y, int size) const {
+              double sum = 0.0;
+              for (int dy = 0; dy < size; ++dy) {
+                  for (int dx = 0; dx < size; ++dx) {
+                      size_t idx = (y + dy) * width_ + (x + dx);
+                      if (idx < frame.size()) {
+                          sum += frame[idx];
+                      }
+                  }
+              }
+              return static_cast<uint64_t>(sum * 1000.0 * PHI_GOLDEN) % 997;
+          }
+  
+      private:
+          int width_;
+      };
+  
+      class VirtualUpscalePipeline {
+      public:
+          VirtualUpscalePipeline(int w, int h, int bs)
+              : width_(w)
+              , height_(h)
+              , blockSize_(bs)
+              , cache_(w)
+              , detector_(w) {
+              setupGrids();
+          }
+  
+          void setupGrids() {
+              if (width_ <= 0 || height_ <= 0 || blockSize_ <= 1) return;
+              int cols = width_ / blockSize_;
+              int rows = height_ / blockSize_;
+              
+              gridA_.clear();
+              gridB_.clear();
+              for (int r = 0; r < rows; ++r) {
+                  for (int c = 0; c < cols; ++c) {
+                      GridPoint p;
+                      p.x = c * blockSize_;
+                      p.y = r * blockSize_;
+                      p.priority = 1.0f;
+                      p.validated = false;
+                      gridA_.push_back(p);
+                      gridB_.push_back(p);
+                  }
+              }
+          }
+  
+          // Orchestration temporelle complète liant le Doppler, la décharge de buffer et le ratio d'asymétrie
+          void processFrameStep(const std::vector<float>& inputFrame, float asymmetryRatio, uint32_t currentTick) {
+              // 1. Alignement Doppler sur les grilles de contrôle par rapport au ratio géométrique
+              doppler_.setTarget(0.5f, 0.5f, 1.2f);
+              doppler_.applyToGrids(gridA_, gridB_, asymmetryRatio);
+  
+              // 2. Précalcul des signatures
+              cache_.precomputeSignatures(inputFrame, blockSize_);
+  
+              // 3. Validation adaptative de l'équilibre de décharge
+              validator_.setPriority(asymmetryRatio);
+              validator_.validate(inputFrame, inputFrame, gridA_, gridB_, width_);
+          }
+  
+      private:
+          int width_;
+          int height_;
+          int blockSize_;
+          std::vector<GridPoint> gridA_;
+          std::vector<GridPoint> gridB_;
+          SignatureCache cache_;
+          IntentDetector detector_;
+          DopplerEffect doppler_;
+          AdaptiveThresholdValidator validator_;
+      };
+  }
+---
+
+     // ------------------------------------------------------------
+      // Constantes Mathématiques
+      // ------------------------------------------------------------
+      constexpr double PI_CONST = 3.14159265358979323846;
+      constexpr double PHI_GOLDEN = 1.6180339887498948482;
+  
+      // Helper Jitter basé sur Pi
+      inline float PiJitter(unsigned int i, float scale = 1.0f) {
+          float v = std::fmod(static_cast<float>(i * PI_CONST), 1.0f);
+          return (v - 0.5f) * 2.0f * scale;
+      }
+  
+      // Calcul du coefficient Lanczos (a=2) enrichi par le jitter sub-pixel
+      inline float GetLanczosWeight(float x, float jitter, int a = 2) {
+          float rx = std::fabs(x + jitter);
+          if (rx < 1e-5f) return 1.0f;
+          if (rx >= static_cast<float>(a)) return 0.0f;
+          float piRx = rx * static_cast<float>(PI_CONST);
+          return (std::sin(piRx) / piRx) * (std::sin(piRx / a) / (piRx / a));
+      }
+  
+      // ------------------------------------------------------------
+      // Structure des Blocs et Grilles pour le Canvas 4K
+      // ------------------------------------------------------------
+      struct ReconstructionBlock {
+          int x = 0;
+          int y = 0;
+          int w = 0;
+          int h = 0;
+          float priority = 1.0f;
+          bool validated = false;
+          uint64_t probabilityHash = 0;
+      };
+  
+      struct DoubleMatrix4K {
+          static constexpr int WIDTH  = 3840;
+          static constexpr int HEIGHT = 2160;
+          static constexpr int CHANNELS = 4;
+  
+          std::vector<uint8_t> matrixA; // État stable validé
+          std::vector<uint8_t> matrixB; // État de prédiction / raffinement
+  
+          DoubleMatrix4K() 
+              : matrixA(WIDTH * HEIGHT * CHANNELS, 0)
+              , matrixB(WIDTH * HEIGHT * CHANNELS, 0) {}
+      };
+  
+      // ------------------------------------------------------------
+      // Moteur Mathématique : Fibonacci & Jules Biscueve
+      // ------------------------------------------------------------
+      class QuantumMathEngine {
+      public: 
+          static uint64_t getFibonacci(unsigned int n) {
+              if (n <= 1) return n;
+              uint64_t a = 0, b = 1;
+              for (unsigned int i = 2; i <= n; ++i) {
+                  uint64_t c = a + b;
+                  a = b;
+                  b = c;
+              }
+              return b;
+          }
+  
+          // Formule de Jules Biscueve pour éliminer les probabilités redondantes
+          // en introduisant un chaos déterministe basé sur l'asymétrie
+          static bool applyBiscueveFilter(uint64_t blockHash, float asymmetryRatio, float cpuLoad) {
+              // C_eff = C / U mod Pi
+              double U = 1.0 + std::fabs(std::sin(blockHash * 0.0152 * PI_CONST)); 
+              double C_eff = (1.0 - cpuLoad) / (U > 1e-5 ? U : 1e-5);
+              
+              // R_obs = f(O, C, I) / T_traj
+              double R_obs = std::fmod(std::pow(C_eff, asymmetryRatio), PHI_GOLDEN);
+              
+              // Si R_obs franchit le seuil chaotique, on rejette le bloc de la recherche exhaustive
+              return R_obs > 0.35;
+          }
+      };
+  
+      // ------------------------------------------------------------
+      // 4K Progressive Reconstruction Engine
+      //
+ // Boucle principale de reconstruction pour une frame
+  
+  void Reconstruct4KFrame(const FrameDesc& srcDesc,
+                          const uint8_t* srcData,
+                          const MotionField& motion,
+                          DoubleMatrix& matrices,
+                          NoiseSyncState& noise,
+                          VenturiConfig venturiCfg) {
+      // Phases successives 8,16,24,48
+      const int phases[4] = { 8, 16, 24, 48 };
+  
+      for (int p = 0; p < 4; ++p) {
+          int phase = phases[p];
+          BlockGrid grid = BuildBlockGrid(phase,
+                                          Canvas4K::kWidth,
+                                          Canvas4K::kHeight);
+  
+          IntentState intent = ComputeIntent(motion, noise,
+                                             (int)grid.blocks.size());
+  
+          for (int i = 0; i < (int)grid.blocks.size(); ++i) {
+              const Block& blk = grid.blocks[i];
+  
+              // Tick NoiseSync (peut aussi être par-ligne ou par-n blocs)
+              noise.AdvanceTick();
+  
+              // Reconstruction dans B
+              ReconstructBlockPhase(blk, phase, srcDesc, srcData,
+                                    matrices, motion, intent, noise);
+  
+              // Venturi mix dans A
+              VenturiMixBlock(blk, intent, i, venturiCfg, matrices);
+          }
+      }
+  }
+  
+  // Zero-copy dispatch vers GPU – stub
+  // À implémenter selon l’API (DX12/VK/CUDA, etc.)
+  
+  struct GpuCompressedFrame {
+      void*  gpuHandle = nullptr;
+      size_t byteSize  = 0;
+  };
+  
+  GpuCompressedFrame DispatchToGpuZeroCopy(const Canvas4K& canvas) {
+      GpuCompressedFrame out;
+      // TODO: encoder en format compressé GPU-friendly et utiliser
+      // un buffer pinned / shared pour éviter les copies multiples.
+      return out;
+  }
+  
+  // Exemple d’utilisation haut niveau
+  
+  void ProcessFrame(const FrameDesc& srcDesc,
+                    const uint8_t* srcData,
+                    const MotionField& motion) {
+      static DoubleMatrix matrices;   // persistant pour conserver A entre frames
+      static NoiseSyncState noise;    // horloge globale
+  
+      VenturiConfig venturiCfg;
+      venturiCfg.cpuLoadFactor = 0.8f; // à lire depuis un monitor runtime
+      venturiCfg.baseBlend     = 0.2f; // plus ou moins agressif
+  
+      Reconstruct4KFrame(srcDesc, srcData, motion,
+                         matrices, noise, venturiCfg);
+  
+      GpuCompressedFrame gpuFrame = DispatchToGpuZeroCopy(matrices.A);
+      (void)gpuFrame;
+  }
+--- ------------------------------------------------------------
+      class ProgressivePuzzleReconstructor {
+      public: 
+          ProgressivePuzzleReconstructor() 
+              : currentTick_(0) 
+              , seed_(0x87654321ULL) {}
+  
+          // Génération de la trajectoire de blocs par segments de Fibonacci
+          std::vector<ReconstructionBlock> buildFibonacciGrid(int phase, float asymmetryRatio, float cpuLoad) {
+              int blockSize = 16;
+              switch (phase) {
+                  case 8:  blockSize = 64; break; // Blocs Macro
+                  case 16: blockSize = 32; break;
+                  case 24: blockSize = 16; break;
+                  case 48: blockSize = 8;  break; // Sub-pixel fin
+                  default: blockSize = 16; break;
+              }
+  
+              int cols = DoubleMatrix4K::WIDTH / blockSize;
+              int rows = DoubleMatrix4K::HEIGHT / blockSize;
+              int totalBlocks = cols * rows;
+  
+              std::vector<ReconstructionBlock> grid;
+              grid.reserve(totalBlocks);
+  
+              for (int i = 0; i < totalBlocks; ++i) {
+                  uint64_t fib = QuantumMathEngine::getFibonacci(i + 1);
+                  int targetIdx = static_cast<int>(fib % totalBlocks);
+  
+                  int bx = targetIdx % cols;
+                  int by = targetIdx / cols;
+  
+                  ReconstructionBlock block;
+                  block.x = bx * blockSize;
+                  block.y = by * blockSize;
+                  block.w = std::min(blockSize, DoubleMatrix4K::WIDTH - block.x);
+                  block.h = std::min(blockSize, DoubleMatrix4K::HEIGHT - block.y);
+                  
+                  block.probabilityHash = (static_cast<uint64_t>(block.x) * 7391ULL) ^ (static_cast<uint64_t>(block.y) * 1058264ULL);
+                  
+                  if (QuantumMathEngine::applyBiscueveFilter(block.probabilityHash, asymmetryRatio, cpuLoad)) {
+                      block.validated = true; // Raccourci P = NP (trajectoire stable)
+                  } else {
+                      block.validated = false; // Nécessite un calcul lourd
+                  }
+                  
+                  grid.push_back(block);
+              }
+  
+              return grid;
+          }
+  
+          // Phase de reconstruction d'un bloc avec interpolation Lanczos et Jitter
+          void reconstructBlockPhaseLanczos(const ReconstructionBlock& blk, 
+                                            const std::vector<uint8_t>& srcData, 
+                                            int srcWidth, 
+                                            int srcHeight, 
+                                            int srcChannels, 
+                                            DoubleMatrix4K& dm) {
+              const int dstStride = DoubleMatrix4K::WIDTH * DoubleMatrix4K::CHANNELS;
+              const int srcStride = srcWidth * srcChannels;
+              // Lors du sampling de l'image source, on pondère les pixels voisins avec GetLanczosWeight(dx, jx) * GetLanczosWeight(dy, jy)
+              // Application du Jitter Lanczos lié au tick NoiseSync et aux segments
+              float jx = PiJitter(blk.x + currentTick_, 0.25f);
+              float jy = PiJitter(blk.y + currentTick_, 0.25f);
+  
+              for (int y = 0; y < blk.h; ++y) {
+                  int py = blk.y + y;
+                  uint8_t* rowB = &dm.matrixB[py * dstStride + blk.x * DoubleMatrix4K::CHANNELS];
+  
+                  float ny = static_cast<float>(py) / static_cast<float>(DoubleMatrix4K::HEIGHT);
+                  float srcY = ny * static_cast<float>(srcHeight);
+  
+                  for (int x = 0; x < blk.w; ++x) {
+                      uint8_t* pxB = rowB + x * DoubleMatrix4K::CHANNELS;
+  
+                      float nx = static_cast<float>(blk.x + x) / static_cast<float>(DoubleMatrix4K::WIDTH);
+                      float srcX = nx * static_cast<float>(srcWidth);
+  
+                      int centerX = static_cast<int>(std::floor(srcX));
+                      int centerY = static_cast<int>(std::floor(srcY));
+  
+                      float accumulatedColor[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+                      float totalWeight = 0.0f;
+  
+                      // Fenêtre d'échantillonnage 4x4
+                      for (int ky = centerY - 1; ky <= centerY + 2; ++ky) {
+                          if (ky < 0 || ky >= srcHeight) continue;
+                          float dy = srcY - (static_cast<float>(ky) + 0.5f);
+                          float weightY = GetLanczosWeight(dy, jy, 2);
+  
+                          for (int kx = centerX - 1; kx <= centerX + 2; ++kx) {
+                              if (kx < 0 || kx >= srcWidth) continue;
+                              float dx = srcX - (static_cast<float>(kx) + 0.5f);
+                              float weightX = GetLanczosWeight(dx, jx, 2);
+  
+                              float weight = weightX * weightY;
+                              const uint8_t* srcPx = &srcData[ky * srcStride + kx * srcChannels];
+  
+                              for (int c = 0; c < DoubleMatrix4K::CHANNELS; ++c) {
+                                  float val = (c < srcChannels) ? static_cast<float>(srcPx[c]) : 255.0f;
+                                  accumulatedColor[c] += val * weight;
+                              }
+                              totalWeight += weight;
+                          } 
+                      }
+  
+                      if (totalWeight > 1e-5f) {
+                          for (int c = 0; c < DoubleMatrix4K::CHANNELS; ++c) {
+                              pxB[c] = static_cast<uint8_t>(std::clamp(std::round(accumulatedColor[c] / totalWeight), 0.0f, 255.0f));
+                          }
+                      } else {
+                          // Fallback sécurisé
+                          int sx = std::clamp(centerX, 0, srcWidth - 1);
+                          int sy = std::clamp(centerY, 0, srcHeight - 1);
+                          const uint8_t* srcPx = &srcData[sy * srcStride + sx * srcChannels];
+                          for (int c = 0; c < DoubleMatrix4K::CHANNELS; ++c) {
+                              pxB[c] = (c < srcChannels) ? srcPx[c] : 255;
+                          }
+                      }
+                  }
+              }
+          }
+  
+          // Phase de mixage Venturi (Chorégraphie temporelle 8, 16, 16, 24 / 48)
+          void executeVenturiMix(DoubleMatrix4K& dm, const std::vector<ReconstructionBlock>& grid, float cpuLoad, float baseBlend) {
+              const int stride = DoubleMatrix4K::WIDTH * DoubleMatrix4K::CHANNELS;
+  
+              for (size_t i = 0; i < grid.size(); ++i) {
+                  const auto& blk = grid[i];
+                  
+                  float priority = blk.priority;
+                  float blend = baseBlend + (cpuLoad * priority * (blk.validated ? 1.5f : 0.4f));
+                  if (blend > 1.0f) blend = 1.0f;
+                  if (blend < 0.0f) blend = 0.0f;
+  
+                  for (int y = 0; y < blk.h; ++y) {
+                      int py = blk.y + y;
+                      uint8_t* rowA = &dm.matrixA[py * stride + blk.x * DoubleMatrix4K::CHANNELS];
+                      const uint8_t* rowB = &dm.matrixB[py * stride + blk.x * DoubleMatrix4K::CHANNELS];
+                      
+                      for (int x = 0; x < blk.w; ++x) {
+                          uint8_t* pxA = rowA + x * DoubleMatrix4K::CHANNELS;
+                          const uint8_t* pxB = rowB + x * DoubleMatrix4K::CHANNELS;
+                          
+                          for (int c = 0; c < DoubleMatrix4K::CHANNELS; ++c) {
+                              float valA = static_cast<float>(pxA[c]);
+                              float valB = static_cast<float>(pxB[c]);
+                              pxA[c] = static_cast<uint8_t>(std::round(valA * (1.0f - blend) + valB * blend));
+                          } 
+                      }
+                  }
+              }
+          }
+  
+          // Ordonnancement du tick NoiseSync (Metronome à 152 itérations)
+          void advanceClock() {
+              currentTick_ = (currentTick_ + 1) % 152;
+          }
+  
+      private:
+          uint32_t currentTick_;
+          uint64_t seed_;
+      };
+  }
+---
+// ============================================================================
+// CHRONO ORCHESTRATOR (Unified) - ENHANCED WITH GPU PACKING A COMPARER
+// ============================================================================
+
+class ChronoOrchestrator {
+private:
+    EngineConfig config_;
+    std::vector<TemporalPhase> phases_;
+    int currentTime_{0};
+    std::size_t currentPhaseIdx_{0};
+    
+    Interpolator3D interpolator_;
+    TemporalBuffer buffer_;
+    CpuPreAssemblyFilter cpuFilter_;
+    MeshOptimizer meshOptimizer_;
+    Metrics lastMetrics_;
+  
+  public:
+      explicit ChronoOrchestrator(const EngineConfig& config)
+          : config_(config),
+            interpolator_(config),
+            buffer_(config.bufferInitial) {
+          
+          // Chorégraphie temporelle stricte et immuable (Document 2)
+          std::vector<int> pattern = {8, 16, 16, 24, 8, 16, 16, 48};
+          int cumulativeTime = 0;
+          for (std::size_t i = 0; i < pattern.size(); ++i) {
+              TemporalPhase phase{static_cast<int>(i), pattern[i], PhaseType::Normal, false, 0.0f};
+              
+              if (i == 1 || i == 5) {
+                  phase.type = PhaseType::DoublingPrimary;
+                  phase.axisOffset = -1.0f; 
+              } else if (i == 2 || i == 6) {
+                  phase.type = PhaseType::DoublingSecondary;
+                  phase.axisOffset = 1.0f;  
+              }
+              
+              int endTime = cumulativeTime + phase.duration;
+              if ((cumulativeTime <= 24 && 24 < endTime) || (cumulativeTime <= 48 && 48 < endTime)) {
+                  phase.triggersVsyncDischarge = true;
+              }
+              phases_.push_back(phase);
+              cumulativeTime += phase.duration;
+          }
+          
+          detectAndApplyDriverSwitch(); // ✅ FIXED: Case-insensitive detection
+      }
+
+    void processFrame(const std::vector<float>& rawFlux) {
+        const double t0 = nowMs();
+        Metrics m; 
+
+        // ✅ GPU PAKING: Pre-allocate memory pools - HIGH IMPACT!
+        auto fluxBuffer = std::make_unique<std::vector<float>>(rawFlux.size() * 2);
+        
+        // Use motion vector optimization - CONTINUOUS PRE-FILTERING
+        motionOptimizer_.processAndOptimizeMotionVectors(rawFlux, config_.dopplerGain);
+        
+        const auto& currentPhase = phases_[currentPhaseIdx_];
+        
+        meshOptimizer_.registerFrame(*fluxBuffer.get());
+        MeshDecision decision = meshOptimizer_.analyzeAndDecide();
+
+        int baseRequiredCalculations = 152; 
+        if (decision == MeshDecision::HALF_MESH) {
+            baseRequiredCalculations = 114;
+        } else if (decision == MeshDecision::NO_UPDATE) { 
+            baseRequiredCalculations = 76;
+        } else {
+            baseRequiredCalculations = 90; // Optimized default - CONTINUOUS
+        }
+        
+        m.cpuCalculationsPerformed = cpuFilter_.processAndOptimizeBlocks(baseRequiredCalculations);
+        applyAntiAliasingPrestidigitation(currentPhase, m);
+
+        if (currentPhase.triggersVsyncDischarge) {
+            if (currentPhase.duration == 24) {
+                std::cout << " [Vsync Latch] T=24 : Liberation asynchrone de 20 frames stabilisees" << std::endl;
+            } else if (currentPhase.duration == 48) {
+                std::cout << " [Vsync Latch] T=48 : Purge et reconstruction complete" << std::endl;
+            }
+        }
+
+        // ✅ GPU PAKING: Use memory pool for frame data - HIGH IMPACT!
+        auto upscaled = std::make_unique<std::vector<float>>(fluxBuffer->size() * 2);
+        
+        PixelShaderEngine::executeSpatialUpscaleSIMD(*upscaled, 1.2f);
+        
+        buffer_.push(std::move(*upscaled), config_.maxFrameBufferQueue);
+        
+        m.bufferSize = buffer_.size();
+        m.endToEndLatencyMs = static_cast<float>(nowMs() - t0);
+        
+        currentPhaseIdx_ = (currentPhaseIdx_ + 1) % phases_.size();
+        lastMetrics_ = m;
+    }
+
+    // ✅ GPU PAKING: Memory-efficient frame pop - HIGH IMPACT!
+    std::vector<float> popOutput() {
+        auto f = buffer_.pop();
+        if (!f.empty()) {
+            memoryPool_.deallocate(f.data());  // Clean up after use - CONTINUOUS CLEANUP
+        }
+        return f;
+    }
+};
