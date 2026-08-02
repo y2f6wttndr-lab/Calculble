@@ -1,0 +1,404 @@
+// ============================================================================
+// main.cpp - FPScale Enhanced Hybrid Pipeline v3.0 Main Application
+// FPScale Modular Plugin System with 12-Stage Pipeline Architecture
+// ============================================================================
+
+#include "gpubackenddispatch.hpp"
+#include <iostream>
+#include <iomanip>
+#include <chrono>
+#include <thread>
+
+namespace fpscale {
+
+// ============================================================================
+// ============================================================================
+// FPSCALE ENHANCED HYBRID PIPELINE - v3.0 MAIN APPLICATION
+// ============================================================================
+
+// ============================================================================
+// Application Configuration
+// ============================================================================
+
+constexpr int DEFAULT_WIDTH = 1920;
+constexpr int DEFAULT_HEIGHT = 1080;
+constexpr float TARGET_FPS = 144.0f;
+constexpr int MAX_FRAME_TIME_MS = 6;
+
+// ============================================================================
+// Frame Statistics
+// ============================================================================
+
+struct FrameStats {
+    uint64_t frame_count;
+    uint64_t total_time_ms;
+    float average_fps;
+    float min_fps;
+    float max_fps;
+    float average_frame_time_ms;
+    bool stable;
+};
+
+// ============================================================================
+// Application State
+// ============================================================================
+
+struct AppState {
+    bool running;
+    FrameStats stats;
+    int current_stage;
+    std::string last_error;
+    bool hardware_detected;
+    bool pipeline_ready;
+};
+
+// ============================================================================
+// ============================================================================
+// MAIN APPLICATION
+// ============================================================================
+
+int main(int argc, char* argv[]) {
+    std::cout << "================================================================================\n";
+    std::cout << "                    FPSCALE ENHANCED HYBRID PIPELINE v3.0\n";
+    std::cout << "              \"Temporal Flux Engine with LuxRender Shutter Integration\"\n";
+    std::cout << "================================================================================\n\n";
+    
+    AppState state;
+    state.running = true;
+    state.stats.frame_count = 0;
+    state.stats.total_time_ms = 0;
+    state.stats.average_fps = 0.0f;
+    state.stats.min_fps = 0.0f;
+    state.stats.max_fps = 0.0f;
+    state.stats.average_frame_time_ms = 0.0f;
+    state.stats.stable = true;
+    state.current_stage = 0;
+    state.last_error = "";
+    state.hardware_detected = false;
+    state.pipeline_ready = false;
+    
+    // ========================================================================
+    // STAGE 0: INITIALIZATION & HARDWARE PROFILE DETECTION
+    // ========================================================================
+    std::cout << "[INIT] Stage 0: Initialization & Hardware Profile Detection\n";
+    std::cout << "----------------------------------------\n";
+    
+    try {
+        // Initialize GPU backend dispatch
+        IGpuBackendDispatch* dispatch = createGpuBackendDispatch();
+        
+        if (!dispatch) {
+            std::cerr << "[ERROR] Failed to create GPU backend dispatch\n";
+            return 1;
+        }
+        
+        // Initialize dispatch
+        if (!dispatch->init()) {
+            std::cerr << "[ERROR] Failed to initialize GPU backend dispatch\n";
+            destroyGpuBackendDispatch(dispatch);
+            return 1;
+        }
+        
+        // Detect hardware
+        if (!dispatch->detectHardware()) {
+            std::cerr << "[ERROR] Failed to detect hardware\n";
+            destroyGpuBackendDispatch(dispatch);
+            return 1;
+        }
+        
+        state.hardware_detected = true;
+        std::cout << "[INFO] Hardware detection completed successfully\n";
+        
+        // Get hardware profile
+        HardwareProfile profile = dispatch->getHardwareProfile();
+        std::cout << "[INFO] GPU: " << profile.gpu_vendor << " " << profile.gpu_model << "\n";
+        std::cout << "[INFO] VRAM: " << (profile.vram_size_bytes / (1024 * 1024 * 1024)) << " GB\n";
+        std::cout << "[INFO] System RAM: " << (profile.system_ram_bytes / (1024 * 1024 * 1024)) << " GB\n";
+        std::cout << "[INFO] Recommended Preset: " << profile.recommended_preset << "\n\n";
+        
+        // ========================================================================
+        // STAGE 1: INITIALIZATION OF PIPELINE STAGES
+        // ========================================================================
+        std::cout << "[INIT] Stage 1: Pipeline Stage Initialization\n";
+        std::cout << "----------------------------------------\n";
+        
+        bool stages_initialized = true;
+        stages_initialized &= dispatch->initializeStage0();
+        stages_initialized &= dispatch->initializeStage1();
+        stages_initialized &= dispatch->initializeStage2();
+        stages_initialized &= dispatch->initializeStage3();
+        stages_initialized &= dispatch->initializeStage4();
+        stages_initialized &= dispatch->initializeStage5();
+        stages_initialized &= dispatch->initializeStage6();
+        stages_initialized &= dispatch->initializeStage7();
+        stages_initialized &= dispatch->initializeStage8();
+        stages_initialized &= dispatch->initializeStage9();
+        stages_initialized &= dispatch->initializeStage10();
+        stages_initialized &= dispatch->initializeStage11();
+        
+        if (stages_initialized) {
+            state.pipeline_ready = true;
+            std::cout << "[INFO] All 12 pipeline stages initialized successfully\n\n";
+        } else {
+            std::cerr << "[ERROR] Failed to initialize one or more pipeline stages\n\n";
+            stages_initialized = false;
+        }
+        
+        // ========================================================================
+        // FRAME LOOP
+        // ========================================================================
+        if (state.pipeline_ready) {
+            std::cout << "[LOOP] Starting Frame Loop\n";
+            std::cout << "----------------------------------------\n";
+            
+            auto start_time = std::chrono::steady_clock::now();
+            int frame_count = 0;
+            float fps_history[60] = {0};
+            float fps_sum = 0.0f;
+            
+            while (state.running) {
+                auto frame_start = std::chrono::steady_clock::now();
+                
+                // =============================================================
+                // STAGE 0: PROCESS FRAME THROUGH 12-STAGE PIPELINE
+                // =============================================================
+                if (dispatch->processFrame(nullptr, DEFAULT_WIDTH, DEFAULT_HEIGHT)) {
+                    // ========================================================
+                    // STAGE 1: RENDER FRAME
+                    // ========================================================
+                    if (dispatch->renderFrame(nullptr, DEFAULT_WIDTH, DEFAULT_HEIGHT)) {
+                        // ========================================================
+                        // STAGE 2: APPLY UPSCALING
+                        // ========================================================
+                        if (dispatch->applyUpscaling(DEFAULT_WIDTH, DEFAULT_HEIGHT)) {
+                            // ========================================================
+                            // STAGE 3: POST-PROCESSING
+                            // ========================================================
+                            PostProcessingOutput& post = PostProcessingOutput::instance();
+                            post.init();
+                            post.configure({
+                                .enable_taa = true,
+                                .adaptive_sharpening = true,
+                                .sharpening_strength = 0.75f,
+                                .tone_mapping = true,
+                                .hdr_support = true
+                            });
+                            post.applyTAA(nullptr, DEFAULT_WIDTH, DEFAULT_HEIGHT);
+                            post.applyAdaptiveSharpening(nullptr, DEFAULT_WIDTH, DEFAULT_HEIGHT);
+                            post.applyToneMapping();
+                            
+                            // ========================================================
+                            // STAGE 4: ANALYTICS & FEEDBACK
+                            // ========================================================
+                            AnalyticsFeedbackLoop& analytics = AnalyticsFeedbackLoop::instance();
+                            analytics.init();
+                            analytics.configure({
+                                .enable_profiling = true,
+                                .enable_bottleneck_detection = true,
+                                .profile_interval_ms = 1000,
+                                .target_fps = TARGET_FPS
+                            });
+                            analytics.sampleFrameTime();
+                            
+                            // ========================================================
+                            // STAGE 5: V-SYNC INJECTION
+                            // ========================================================
+                            VSyncInjector& vsync = VSyncInjector::instance();
+                            vsync.init();
+                            vsync.configure({
+                                .mesh_injection_cycles = {2, 2, 4, 2, 4, 2},
+                                .frame_buffer_depth = 2,
+                                .hardware_vsync = true,
+                                .target_fps = TARGET_FPS
+                            });
+                            vsync.injectMesh();
+                            vsync.bufferFrame();
+                            
+                            auto frame_end = std::chrono::steady_clock::now();
+                            auto frame_duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                frame_end - frame_start).count();
+                            
+                            // Calculate FPS
+                            float fps = 1000.0f / frame_duration;
+                            fps_history[frame_count % 60] = fps;
+                            fps_sum += fps;
+                            
+                            state.stats.frame_count++;
+                            state.stats.total_time_ms += frame_duration;
+                            
+                            // Update statistics
+                            state.stats.average_fps = fps_sum / 60.0f;
+                            state.stats.min_fps = state.stats.min_fps == 0.0f ? fps : 
+                                std::min(state.stats.min_fps, fps);
+                            state.stats.max_fps = state.stats.max_fps == 0.0f ? fps : 
+                                std::max(state.stats.max_fps, fps);
+                            
+                            // Calculate average frame time
+                            state.stats.average_frame_time_ms = 
+                                state.stats.total_time_ms / state.stats.frame_count;
+                            
+                            // Check stability (FPS variance < 10%)
+                            float fps_variance = 0.0f;
+                            if (frame_count > 1) {
+                                float fps_avg = state.stats.average_fps;
+                                for (int i = 0; i < 60; i++) {
+                                    fps_variance += std::abs(fps_history[i] - fps_avg);
+                                }
+                                fps_variance /= 60.0f;
+                            }
+                            state.stats.stable = fps_variance < (state.stats.average_fps * 0.1f);
+                            
+                            // ========================================================
+                            // STAGE 6: OUTPUT
+                            // ========================================================
+                            // Simulate frame output
+                            // In real implementation, this would display the frame
+                            
+                            // ========================================================
+                            // STAGE 7: REPORT
+                            // ========================================================
+                            if (frame_count % 30 == 0) {
+                                std::cout << std::fixed << std::setprecision(2);
+                                std::cout << "[FRAME " << frame_count << "] FPS: " << fps 
+                                          << " | Avg: " << state.stats.average_fps 
+                                          << " | Min: " << state.stats.min_fps 
+                                          << " | Max: " << state.stats.max_fps 
+                                          << " | Avg Frame Time: " << state.stats.average_frame_time_ms << "ms\n";
+                            }
+                            
+                            // ========================================================
+                            // STAGE 8: FRAME PACING
+                            // ========================================================
+                            // Calculate target frame time
+                            float target_frame_time = 1000.0f / TARGET_FPS;
+                            
+                            // ========================================================
+                            // STAGE 9: FRAME PACE
+                            // ========================================================
+                            // Sleep if we're ahead of schedule
+                            if (frame_duration < target_frame_time) {
+                                float sleep_time = target_frame_time - frame_duration;
+                                std::this_thread::sleep_for(std::chrono::milliseconds(
+                                    static_cast<int>(sleep_time)));
+                            }
+                        } else {
+                            std::cerr << "[ERROR] Stage 9 (Upscaling) failed\n";
+                        }
+                    } else {
+                        std::cerr << "[ERROR] Stage 2 (Rendering) failed\n";
+                    }
+                } else {
+                    std::cerr << "[ERROR] Stage 0 (Processing) failed\n";
+                }
+                
+                frame_count++;
+                
+                // ========================================================
+                // STAGE 10: PERIODIC REPORTING
+                // ========================================================
+                if (frame_count % 60 == 0) {
+                    std::cout << "\n[REPORT] Frame Statistics\n";
+                    std::cout << "----------------------------------------\n";
+                    std::cout << std::fixed << std::setprecision(2);
+                    std::cout << "Frames Processed: " << state.stats.frame_count << "\n";
+                    std::cout << "Total Time: " << state.stats.total_time_ms << "ms\n";
+                    std::cout << "Average FPS: " << state.stats.average_fps << "\n";
+                    std::cout << "Min FPS: " << state.stats.min_fps << "\n";
+                    std::cout << "Max FPS: " << state.stats.max_fps << "\n";
+                    std::cout << "Average Frame Time: " << state.stats.average_frame_time_ms << "ms\n";
+                    std::cout << "Stable: " << (state.stats.stable ? "Yes" : "No") << "\n\n";
+                }
+                
+                // ========================================================
+                // STAGE 11: CHECK FOR EXIT
+                // ========================================================
+                // In real implementation, this would check for keyboard input
+                // For demonstration, we run for 5 seconds
+                if (frame_count > 150) {  // ~1 second at 144 FPS
+                    break;
+                }
+            }
+            
+            // ========================================================
+            // STAGE 12: CLEANUP
+            // ========================================================
+            std::cout << "\n[CLEANUP] Shutting Down FPScale Application\n";
+            std::cout << "----------------------------------------\n";
+            
+            // Calculate final statistics
+            float final_fps = state.stats.frame_count > 0 ? 
+                1000.0f / (state.stats.total_time_ms / state.stats.frame_count) : 0.0f;
+            
+            std::cout << std::fixed << std::setprecision(2);
+            std::cout << "Final Statistics:\n";
+            std::cout << "  Total Frames: " << state.stats.frame_count << "\n";
+            std::cout << "  Total Time: " << state.stats.total_time_ms << "ms\n";
+            std::cout << "  Final FPS: " << final_fps << "\n";
+            std::cout << "  Average FPS: " << state.stats.average_fps << "\n";
+            std::cout << "  Stable: " << (state.stats.stable ? "Yes" : "No") << "\n";
+            std::cout << "\n";
+            
+            // ========================================================
+            // STAGE 13: SHUTDOWN
+            // ========================================================
+            std::cout << "[SHUTDOWN] Cleaning up resources...\n";
+            
+            // Shutdown analytics
+            AnalyticsFeedbackLoop::instance().shutdown();
+            
+            // Shutdown post-processing
+            PostProcessingOutput::instance().shutdown();
+            
+            // Shutdown GPU render pipeline
+            GPURenderPipeline::instance().shutdown();
+            
+            // Shutdown matrix reconstruction
+            MatrixReconstructionEngine::instance().shutdown();
+            
+            // Shutdown LuxRays swap engine
+            LuxRaysSwapEngine::instance().shutdown();
+            
+            // Shutdown V-Sync injector
+            VSyncInjector::instance().shutdown();
+            
+            // Shutdown temporal buffer manager
+            TemporalBufferManager::instance().shutdown();
+            
+            // Shutdown temporal flux engine
+            TemporalFluxEngine::instance().shutdown();
+            
+            // Shutdown shutter sampler
+            ShutterSampler::instance().shutdown();
+            
+            // Shutdown temporal analyzer
+            TemporalAnalyzer::instance().shutdown();
+            
+            // Shutdown asset loader
+            AssetLoader::instance().shutdown();
+            
+            // Shutdown hardware detector
+            HardwareDetector::instance().shutdown();
+            
+            // Shutdown dispatch
+            destroyGpuBackendDispatch(dispatch);
+            
+            std::cout << "[SHUTDOWN] All resources cleaned up successfully\n";
+            std::cout << "================================================================================\n";
+            std::cout << "                    FPSCALE v3.0 - Application Closed\n";
+            std::cout << "================================================================================\n";
+        } else {
+            std::cerr << "[ERROR] Pipeline not ready. Exiting.\n";
+        }
+        
+    } catch (const std::exception& e) {
+        std::cerr << "[ERROR] Exception caught: " << e.what() << "\n";
+        std::cerr << "[ERROR] FPScale application terminated abnormally\n";
+        return 1;
+    }
+    
+    return 0;
+}
+
+// ============================================================================
+// END OF main.cpp
+// ============================================================================
