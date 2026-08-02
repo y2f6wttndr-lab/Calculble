@@ -1,0 +1,474 @@
+// ============================================================================
+// GPUBackendDispatch.hpp - GPU Backend Dispatch Interface
+// FPScale Enhanced Hybrid Pipeline v3.0 - Modular Plugin System
+// ============================================================================
+
+#pragma once
+
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <chrono>
+
+namespace fpscale {
+
+// ============================================================================
+// ============================================================================
+// ARCHITECTURAL BLUEPRINT - v3.0 ENHANCED
+// ============================================================================
+
+// ============================================================================
+// STAGE 0: INITIALIZATION & HARDWARE PROFILE DETECTION
+// ============================================================================
+
+struct HardwareProfile {
+    std::string gpu_vendor;
+    std::string gpu_model;
+    uint64_t vram_size_bytes;
+    uint64_t system_ram_bytes;
+    std::string bios_allocation_profile;
+    bool supports_directx12;
+    bool supports_nvapi;
+    bool supports_vulkan;
+    float performance_score;
+    std::string recommended_preset;
+};
+
+struct HardwareDetection {
+    HardwareProfile profile;
+    bool detection_complete;
+    std::string detection_timestamp;
+    std::vector<std::string> supported_features;
+};
+
+class HardwareDetector {
+public:
+    static HardwareDetector& instance();
+    bool init();
+    bool detect();
+    HardwareProfile getProfile() const;
+    void applyPreset(const std::string& preset_name);
+    std::string getRecommendedPreset() const;
+    void shutdown();
+    
+private:
+    HardwareDetector();
+    ~HardwareDetector();
+    HardwareProfile m_profile;
+    bool m_initialized;
+};
+
+// ============================================================================
+// STAGE 1: ASSET LOADING & COMPRESSION (GPU-ACCELERATED)
+// ============================================================================
+
+struct AssetConfig {
+    int quality_level;
+    bool enable_compression;
+    int compression_quality;
+    std::string texture_format;
+    int max_texture_size;
+};
+
+class AssetLoader {
+public:
+    static AssetLoader& instance();
+    bool init();
+    bool load(const std::string& path, void** data, size_t* size);
+    bool unload(void* data);
+    bool compress(void* data, void** compressed, size_t* compressed_size);
+    bool decompress(void* compressed, void** decompressed, size_t* decompressed_size);
+    void shutdown();
+    
+private:
+    AssetLoader();
+    ~AssetLoader();
+    bool m_initialized;
+};
+
+// ============================================================================
+// STAGE 2: TEMPORAL ANALYSIS & INTENT DETECTION
+// ============================================================================
+
+struct TemporalAnalysis {
+    int64_t frame_timestamp;
+    float motion_intensity;
+    float coherence_score;
+    float variation_mean;
+    bool high_intent;
+    std::vector<float> temporal_pattern;
+};
+
+class TemporalAnalyzer {
+public:
+    static TemporalAnalyzer& instance();
+    bool init();
+    void analyzeFrame(void* frame_data, int width, int height);
+    TemporalAnalysis getAnalysis() const;
+    float getMotionIntensity() const;
+    float getCoherenceScore() const;
+    void shutdown();
+    
+private:
+    TemporalAnalyzer();
+    ~TemporalAnalyzer();
+    TemporalAnalysis m_analysis;
+    bool m_initialized;
+};
+
+// ============================================================================
+// STAGE 3: SHUTTER SAMPLER (LUXRENDER INTEGRATION)
+// ============================================================================
+
+struct ShutterConfig {
+    float shutter_speed;
+    float temporal_offset;
+    int num_sub_passes;
+    float gaussian_weight;
+    bool adaptive_shutter;
+};
+
+class ShutterSampler {
+public:
+    static ShutterSampler& instance();
+    bool init();
+    void configure(const ShutterConfig& config);
+    void sampleFrame(void* frame_data, int width, int height);
+    void applyGaussianWeight(float* frame_data, int width, int height);
+    void shutdown();
+    
+private:
+    ShutterSampler();
+    ~ShutterSampler();
+    ShutterConfig m_config;
+    bool m_initialized;
+};
+
+// ============================================================================
+// STAGE 4: INTERPOLATION & TEMPORAL FLUX ENGINE
+// ============================================================================
+
+struct InterpolationConfig {
+    float alpha_weight;
+    bool motion_vector_based;
+    int interpolation_quality;
+    float doppler_coefficient;
+};
+
+class TemporalFluxEngine {
+public:
+    static TemporalFluxEngine& instance();
+    bool init();
+    void configure(const InterpolationConfig& config);
+    void interpolateFrame(void* prev_frame, void* curr_frame, void* next_frame,
+                         void* output, int width, int height);
+    void applyDopplerEffect(float* frame_data, int width, int height);
+    void shutdown();
+    
+private:
+    TemporalFluxEngine();
+    ~TemporalFluxEngine();
+    InterpolationConfig m_config;
+    bool m_initialized;
+};
+
+// ============================================================================
+// STAGE 5: NOISE SYNCHRONIZATION & TEMPORAL BUFFER
+// ============================================================================
+
+struct NoiseSyncConfig {
+    float noise_sigma;
+    int buffer_capacity;
+    bool adaptive_buffer;
+    bool zero_copy;
+};
+
+class TemporalBufferManager {
+public:
+    static TemporalBufferManager& instance();
+    bool init();
+    void configure(const NoiseSyncConfig& config);
+    void syncNoise(float* frame_data, int width, int height);
+    void manageBuffer();
+    void shutdown();
+    
+private:
+    TemporalBufferManager();
+    ~TemporalBufferManager();
+    NoiseSyncConfig m_config;
+    bool m_initialized;
+};
+
+// ============================================================================
+// STAGE 6: V-SYNC INJECTOR (CITRON MODDED)
+// ============================================================================
+
+struct VSyncConfig {
+    int mesh_injection_cycles;
+    int frame_buffer_depth;
+    bool hardware_vsync;
+    float target_fps;
+};
+
+class VSyncInjector {
+public:
+    static VSyncInjector& instance();
+    bool init();
+    void configure(const VSyncConfig& config);
+    void injectMesh();
+    void bufferFrame();
+    void shutdown();
+    
+private:
+    VSyncInjector();
+    ~VSyncInjector();
+    VSyncConfig m_config;
+    bool m_initialized;
+};
+
+// ============================================================================
+// STAGE 7: LUXRAYS SWAP ENGINE (CPU ⇄ GPU SWAP)
+// ============================================================================
+
+struct LuxRaysConfig {
+    uint64_t vram_limit;
+    bool enable_swap;
+    int swap_threshold;
+    bool zero_copy;
+};
+
+class LuxRaysSwapEngine {
+public:
+    static LuxRaysSwapEngine& instance();
+    bool init();
+    void configure(const LuxRaysConfig& config);
+    void regulateVRAM();
+    void cpuGpuSwap();
+    void shutdown();
+    
+private:
+    LuxRaysSwapEngine();
+    ~LuxRaysSwapEngine();
+    LuxRaysConfig m_config;
+    bool m_initialized;
+};
+
+// ============================================================================
+// STAGE 8: MATRIX RECONSTRUCTION ENGINE
+// ============================================================================
+
+struct MatrixConfig {
+    int grid_width;
+    int grid_height;
+    int num_channels;
+    float lanczos_jitter;
+    bool adaptive_validation;
+};
+
+class MatrixReconstructionEngine {
+public:
+    static MatrixReconstructionEngine& instance();
+    bool init();
+    void configure(const MatrixConfig& config);
+    void reconstructFrame(void* input, void* output, int width, int height);
+    void applyLanczosJitter(float* frame_data, int width, int height);
+    void shutdown();
+    
+private:
+    MatrixReconstructionEngine();
+    ~MatrixReconstructionEngine();
+    MatrixConfig m_config;
+    bool m_initialized;
+};
+
+// ============================================================================
+// STAGE 9: GPU RENDER PIPELINE (NVIDIA DIRECT)
+// ============================================================================
+
+struct RenderPipelineConfig {
+    int half_frame_render;
+    bool compression_upscale;
+    bool dual_buffered;
+    bool gpu_culling;
+    int culling_quality;
+};
+
+class GPURenderPipeline {
+public:
+    static GPURenderPipeline& instance();
+    bool init();
+    void configure(const RenderPipelineConfig& config);
+    void renderHalfFrame(void* mesh_data, int width, int height);
+    void applyCompressionUpscale();
+    void shutdown();
+    
+private:
+    GPURenderPipeline();
+    ~GPURenderPipeline();
+    RenderPipelineConfig m_config;
+    bool m_initialized;
+};
+
+// ============================================================================
+// STAGE 10: POST-PROCESSING & OUTPUT
+// ============================================================================
+
+struct PostProcessingConfig {
+    bool enable_taa;
+    bool adaptive_sharpening;
+    float sharpening_strength;
+    bool tone_mapping;
+    bool hdr_support;
+};
+
+class PostProcessingOutput {
+public:
+    static PostProcessingOutput& instance();
+    bool init();
+    void configure(const PostProcessingConfig& config);
+    void applyTAA(void* frame_data, int width, int height);
+    void applyAdaptiveSharpening(float* frame_data, int width, int height);
+    void applyToneMapping();
+    void shutdown();
+    
+private:
+    PostProcessingOutput();
+    ~PostProcessingOutput();
+    PostProcessingConfig m_config;
+    bool m_initialized;
+};
+
+// ============================================================================
+// STAGE 11: ANALYTICS & FEEDBACK LOOP
+// ============================================================================
+
+struct AnalyticsConfig {
+    bool enable_profiling;
+    bool enable_bottleneck_detection;
+    int profile_interval_ms;
+    float target_fps;
+};
+
+class AnalyticsFeedbackLoop {
+public:
+    static AnalyticsFeedbackLoop& instance();
+    bool init();
+    void configure(const AnalyticsConfig& config);
+    void sampleFrameTime();
+    void detectBottleneck();
+    void shutdown();
+    
+private:
+    AnalyticsFeedbackLoop();
+    ~AnalyticsFeedbackLoop();
+    AnalyticsConfig m_config;
+    bool m_initialized;
+};
+
+// ============================================================================
+// CORE PLUGIN MANAGER
+// ============================================================================
+
+struct PluginInfo {
+    std::string name;
+    std::string version;
+    std::string description;
+    std::vector<std::string> dependencies;
+    bool enabled;
+};
+
+class PluginManager {
+public:
+    static PluginManager& instance();
+    bool init();
+    bool loadPlugin(const std::string& plugin_path);
+    bool unloadPlugin(const std::string& plugin_name);
+    PluginInfo getPluginInfo(const std::string& plugin_name) const;
+    std::vector<PluginInfo> getLoadedPlugins() const;
+    void enablePlugin(const std::string& plugin_name);
+    void disablePlugin(const std::string& plugin_name);
+    void shutdown();
+    
+private:
+    PluginManager();
+    ~PluginManager();
+    std::vector<PluginInfo> m_loaded_plugins;
+    bool m_initialized;
+};
+
+// ============================================================================
+// GPU BACKEND DISPATCH INTERFACE
+// ============================================================================
+
+class IGpuBackendDispatch {
+public:
+    virtual ~IGpuBackendDispatch() = default;
+    
+    // Lifecycle
+    virtual bool init() = 0;
+    virtual void shutdown() = 0;
+    
+    // Hardware Detection
+    virtual bool detectHardware() = 0;
+    virtual HardwareProfile getHardwareProfile() const = 0;
+    
+    // Pipeline Stages
+    virtual bool initializeStage0() = 0;  // Init & Hardware Profile
+    virtual bool initializeStage1() = 0;  // Asset Loading
+    virtual bool initializeStage2() = 0;  // Temporal Analysis
+    virtual bool initializeStage3() = 0;  // Shutter Sampling
+    virtual bool initializeStage4() = 0;  // Interpolation
+    virtual bool initializeStage5() = 0;  // Noise Sync
+    virtual bool initializeStage6() = 0;  // V-Sync Injector
+    virtual bool initializeStage7() = 0;  // LuxRays Swap
+    virtual bool initializeStage8() = 0;  // Matrix Reconstruction
+    virtual bool initializeStage9() = 0;  // GPU Render Pipeline
+    virtual bool initializeStage10() = 0; // Post-Processing
+    virtual bool initializeStage11() = 0; // Analytics
+    
+    // Core Operations
+    virtual bool processFrame(void* frame_data, int width, int height) = 0;
+    virtual bool renderFrame(void* framebuffer, int width, int height) = 0;
+    virtual bool applyUpscaling(int target_width, int target_height) = 0;
+    
+    // Configuration
+    virtual void configure(int stage, const void* config) = 0;
+    virtual void* getConfig(int stage) const = 0;
+    
+    // Query
+    virtual bool isInitialized() const = 0;
+    virtual int getStageStatus(int stage) const = 0;
+    virtual std::string getLastError() const = 0;
+    
+    // Plugin Management
+    virtual bool loadPlugin(const std::string& plugin_path) = 0;
+    virtual bool unloadPlugin(const std::string& plugin_name) = 0;
+    
+protected:
+    IGpuBackendDispatch();
+    virtual ~IGpuBackendDispatch();
+};
+
+// ============================================================================
+// FACTORY FUNCTIONS
+// ============================================================================
+
+IGpuBackendDispatch* createGpuBackendDispatch();
+void destroyGpuBackendDispatch(IGpuBackendDispatch* dispatch);
+
+// ============================================================================
+// CONFIGURATION LITERALS
+// ============================================================================
+
+constexpr int DEFAULT_GRID_WIDTH = 3840;
+constexpr int DEFAULT_GRID_HEIGHT = 2160;
+constexpr int DEFAULT_NUM_CHANNELS = 4;
+constexpr float DEFAULT_LANCZOS_JITTER = 0.15f;
+constexpr int DEFAULT_SWAP_THRESHOLD = 80;
+constexpr float DEFAULT_SHARPENING_STRENGTH = 0.75f;
+
+// ============================================================================
+// END OF GPUBackendDispatch.hpp
+// ============================================================================
