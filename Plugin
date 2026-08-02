@@ -1,0 +1,536 @@
+// ============================================================================
+// plugininterfaces.hpp - Plugin Interface Definitions
+// FPScale Enhanced Hybrid Pipeline v3.0 - Modular Plugin System
+// ============================================================================
+
+#pragma once
+
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <functional>
+#include <memory>
+
+// ============================================================================
+// ============================================================================
+// ARCHITECTURAL BLUEPRINT - v3.0 ENHANCED
+// ============================================================================
+
+// ============================================================================
+// PLUGIN LIFECYCLE INTERFACE
+// ============================================================================
+
+class IPlugin {
+public:
+    virtual ~IPlugin() = default;
+    
+    // Identification
+    virtual std::string name() const = 0;
+    virtual std::string version() const = 0;
+    virtual std::string description() const = 0;
+    
+    // Lifecycle
+    virtual bool init() = 0;
+    virtual void shutdown() = 0;
+    
+    // Enable/Disable
+    virtual bool enable() = 0;
+    virtual bool disable() = 0;
+    virtual bool isEnabled() const = 0;
+    
+    // Query
+    virtual bool isInitialized() const = 0;
+    virtual std::string getLastError() const = 0;
+    virtual int getErrorCode() const = 0;
+    
+    // Configuration
+    virtual void setConfig(const void* config) = 0;
+    virtual void* getConfig() const = 0;
+    
+protected:
+    IPlugin();
+    virtual ~IPlugin();
+};
+
+// ============================================================================
+// STAGE 0: HARDWARE DETECTION PLUGIN INTERFACE
+// ============================================================================
+
+struct HardwareDetectionConfig {
+    bool enable_nvapi;
+    bool enable_amd_adrenalin;
+    bool enable_intel_igpu;
+    bool enable_cpu_detection;
+    bool enable_ram_detection;
+};
+
+class IHardwareDetectionPlugin : public IPlugin {
+public:
+    virtual ~IHardwareDetectionPlugin() = default;
+    
+    // Detection
+    virtual bool detect() = 0;
+    virtual bool isDetected() const = 0;
+    
+    // Profile
+    virtual std::string getGpuVendor() const = 0;
+    virtual std::string getGpuModel() const = 0;
+    virtual uint64_t getVramSize() const = 0;
+    virtual uint64_t getSystemRam() const = 0;
+    virtual float getPerformanceScore() const = 0;
+    virtual std::string getRecommendedPreset() const = 0;
+    
+    // Features
+    virtual std::vector<std::string> getSupportedFeatures() const = 0;
+    virtual bool supportsDirectX12() const = 0;
+    virtual bool supportsNVAPI() const = 0;
+    virtual bool supportsVulkan() const = 0;
+    
+    // Preset Management
+    virtual bool applyPreset(const std::string& preset_name) = 0;
+    virtual bool getAvailablePresets(std::vector<std::string>& presets) const = 0;
+    
+    // Query
+    virtual bool isDetectionComplete() const = 0;
+    virtual std::string getDetectionTimestamp() const = 0;
+    
+protected:
+    IHardwareDetectionPlugin();
+    virtual ~IHardwareDetectionPlugin();
+};
+
+// ============================================================================
+// STAGE 1: FRAME PROCESSING PLUGIN INTERFACE
+// ============================================================================
+
+struct FrameProcessingConfig {
+    int quality_level;
+    bool enable_compression;
+    int compression_quality;
+    bool enable_motion_analysis;
+    bool enable_temporal_filtering;
+};
+
+class IFrameProcessingPlugin : public IPlugin {
+public:
+    virtual ~IFrameProcessingPlugin() = default;
+    
+    // Frame Processing
+    virtual bool processFrame(void* frame_data, int width, int height) = 0;
+    virtual bool processBatch(void* frames[], int frame_count, int width, int height) = 0;
+    
+    // Motion Analysis
+    virtual bool analyzeMotion(void* frame_data, int width, int height) = 0;
+    virtual float getMotionIntensity() const = 0;
+    virtual float getMotionVector(const int x, const int y) const = 0;
+    
+    // Temporal Filtering
+    virtual bool applyTemporalFilter(void* frame_data, int width, int height) = 0;
+    virtual float getCoherenceScore() const = 0;
+    virtual float getVariationMean() const = 0;
+    
+    // Compression
+    virtual bool compressFrame(void* frame_data, void** compressed, size_t* compressed_size) = 0;
+    virtual bool decompressFrame(void* compressed, void** decompressed, size_t* decompressed_size) = 0;
+    
+    // Query
+    virtual int getProcessedFrameCount() const = 0;
+    virtual int getCompressionRatio() const = 0;
+    
+protected:
+    IFrameProcessingPlugin();
+    virtual ~IFrameProcessingPlugin();
+};
+
+// ============================================================================
+// STAGE 2: GRAPHICS PIPELINE PLUGIN INTERFACE
+// ============================================================================
+
+struct GraphicsPipelineConfig {
+    int render_target_width;
+    int render_target_height;
+    int color_bits;
+    int depth_bits;
+    bool enable_vsync;
+    int vsync_mode;
+    bool enable_gbuffer;
+    int gbuffer_depth;
+    bool enable_antialiasing;
+    int antialiasing_method;
+    bool enable_post_processing;
+    int post_processing_quality;
+    bool enable_shadows;
+    bool enable_upscaling;
+    int upscaling_quality;
+    int filter_type;
+    int rescale_quality;
+    int output_format;
+};
+
+class IGraphicsPipelinePlugin : public IPlugin {
+public:
+    virtual ~IGraphicsPipelinePlugin() = default;
+    
+    // Lifecycle
+    virtual bool init() = 0;
+    virtual void shutdown() = 0;
+    
+    // Rendering
+    virtual bool renderFrame(void* framebuffer, int width, int height) = 0;
+    virtual bool renderToTexture(void* texture, int width, int height) = 0;
+    virtual bool renderHalfFrame(void* mesh_data, int width, int height) = 0;
+    
+    // Buffer Management
+    virtual bool allocateBuffer(void** buffer, int width, int height, int color_bits) = 0;
+    virtual bool freeBuffer(void* buffer) = 0;
+    virtual bool swapBuffers(void* front_buffer, void* back_buffer) = 0;
+    
+    // Anti-Aliasing
+    virtual bool applyMultisample(void* framebuffer, int width, int height) = 0;
+    virtual bool applyTAA(void* framebuffer, int width, int height) = 0;
+    virtual bool applyFXAA(void* framebuffer, int width, int height) = 0;
+    
+    // Post-Processing
+    virtual bool applyBloom(void* framebuffer, int width, int height) = 0;
+    virtual bool applyTonemapping(void* framebuffer, int width, int height) = 0;
+    virtual bool applySharpening(float* framebuffer, int width, int height) = 0;
+    
+    // Upscaling
+    virtual bool applyUpscaling(void* framebuffer, int src_width, int src_height,
+                               int dst_width, int dst_height) = 0;
+    virtual bool applyDLSS(void* framebuffer, int width, int height) = 0;
+    virtual bool applyFSR(void* framebuffer, int width, int height) = 0;
+    
+    // Query
+    virtual bool isInitialized() const = 0;
+    virtual GraphicsPipelineConfig getConfig() const = 0;
+    virtual void setConfig(const GraphicsPipelineConfig& config) = 0;
+    
+protected:
+    IGraphicsPipelinePlugin();
+    virtual ~IGraphicsPipelinePlugin();
+};
+
+// ============================================================================
+// STAGE 3: AUDIO MANAGER PLUGIN INTERFACE
+// ============================================================================
+
+struct AudioConfig {
+    int sample_rate;
+    int channels;
+    int bit_depth;
+    int buffer_size;
+    bool enable_3d_audio;
+    float master_volume;
+    float music_volume;
+    float sfx_volume;
+    int audio_driver;
+};
+
+class IAudioManagerPlugin : public IPlugin {
+public:
+    virtual ~IAudioManagerPlugin() = default;
+    
+    // Initialization
+    virtual bool init() = 0;
+    virtual void shutdown() = 0;
+    
+    // Playback
+    virtual bool play(const void* audio_data, int duration_ms) = 0;
+    virtual bool stop() = 0;
+    virtual bool pause() = 0;
+    virtual bool resume() = 0;
+    
+    // Volume Control
+    virtual void setMasterVolume(float volume) = 0;
+    virtual void setMusicVolume(float volume) = 0;
+    virtual void setSFXVolume(float volume) = 0;
+    virtual float getMasterVolume() const = 0;
+    virtual float getMusicVolume() const = 0;
+    virtual float getSFXVolume() const = 0;
+    
+    // 3D Audio
+    virtual void setListenerPosition(float x, float y, float z) = 0;
+    virtual void setListenerRotation(float pitch, float yaw, float roll) = 0;
+    virtual void setSourcePosition(int source_id, float x, float y, float z) = 0;
+    
+    // Query
+    virtual bool isInitialized() const = 0;
+    virtual AudioConfig getConfig() const = 0;
+    virtual void setConfig(const AudioConfig& config) = 0;
+    
+protected:
+    IAudioManagerPlugin();
+    virtual ~IAudioManagerPlugin();
+};
+
+// ============================================================================
+// STAGE 4: LATENCY OPTIMIZER PLUGIN INTERFACE
+// ============================================================================
+
+struct LatencyConfig {
+    int target_fps;
+    int max_frame_time_ms;
+    bool enable_frame_pacing;
+    int vsync_mode;
+    int mesh_injection_cycles;
+    int frame_buffer_depth;
+    bool hardware_vsync;
+};
+
+class ILatencyOptimizerPlugin : public IPlugin {
+public:
+    virtual ~ILatencyOptimizerPlugin() = default;
+    
+    // Optimization
+    virtual bool optimize() = 0;
+    virtual bool applyFramePacing() = 0;
+    virtual bool applyFrameTimeControl() = 0;
+    
+    // Frame Pacing
+    virtual bool paceFrame() = 0;
+    virtual float getFrameTime() const = 0;
+    virtual float getTargetFrameTime() const = 0;
+    virtual bool isFramePaced() const = 0;
+    
+    // V-Sync
+    virtual bool enableVSync(int mode) = 0;
+    virtual bool disableVSync() = 0;
+    virtual int getVSyncMode() const = 0;
+    
+    // Query
+    virtual bool isOptimized() const = 0;
+    virtual int getCurrentFrameTime() const = 0;
+    virtual int getAverageFrameTime() const = 0;
+    virtual float getLatency() const = 0;
+    
+protected:
+    ILatencyOptimizerPlugin();
+    virtual ~ILatencyOptimizerPlugin();
+};
+
+// ============================================================================
+// STAGE 5: MEMORY MANAGER PLUGIN INTERFACE
+// ============================================================================
+
+struct MemoryConfig {
+    int pool_size_mb;
+    int block_size_kb;
+    int max_pool_depth;
+    double memory_watermark_mb;
+    bool enable_memory_pool;
+    int memory_allocation_strategy;
+};
+
+class IMemoryManagerPlugin : public IPlugin {
+public:
+    virtual ~IMemoryManagerPlugin() = default;
+    
+    // Memory Pool
+    virtual bool allocatePool() = 0;
+    virtual bool freePool() = 0;
+    virtual bool* allocateBlock() = 0;
+    virtual void freeBlock(bool* block) = 0;
+    virtual int getPoolSize() const = 0;
+    virtual int getAvailablePoolSize() const = 0;
+    virtual int getAllocatedPoolSize() const = 0;
+    
+    // Memory Monitoring
+    virtual bool monitorMemory() = 0;
+    virtual uint64_t getMemoryUsage() const = 0;
+    virtual uint64_t getPeakMemoryUsage() const = 0;
+    virtual bool isMemoryCritical() const = 0;
+    
+    // Fragmentation
+    virtual int getFragmentationRatio() const = 0;
+    virtual bool defragment() = 0;
+    virtual bool isDefragmenting() const = 0;
+    
+    // Query
+    virtual bool isInitialized() const = 0;
+    virtual MemoryConfig getConfig() const = 0;
+    virtual void setConfig(const MemoryConfig& config) = 0;
+    
+protected:
+    IMemoryManagerPlugin();
+    virtual ~IMemoryManagerPlugin();
+};
+
+// ============================================================================
+// STAGE 6: OUTPUT RENDERER PLUGIN INTERFACE
+// ============================================================================
+
+struct OutputRendererConfig {
+    int output_width;
+    int output_height;
+    int output_format;
+    bool enable_recording;
+    bool enable_encoding;
+    int encoder_quality;
+    std::string output_path;
+    int fps;
+};
+
+class IOutputRendererPlugin : public IPlugin {
+public:
+    virtual ~IOutputRendererPlugin() = default;
+    
+    // Output
+    virtual bool renderOutput(void* framebuffer, int width, int height) = 0;
+    virtual bool captureFrame() = 0;
+    virtual bool displayFrame(void* framebuffer, int width, int height) = 0;
+    
+    // Recording
+    virtual bool startRecording(const std::string& path) = 0;
+    virtual bool stopRecording() = 0;
+    virtual bool isRecording() const = 0;
+    
+    // Encoding
+    virtual bool startEncoding(const std::string& path) = 0;
+    virtual bool stopEncoding() = 0;
+    virtual bool isEncoding() const = 0;
+    
+    // Query
+    virtual bool isInitialized() const = 0;
+    virtual OutputRendererConfig getConfig() const = 0;
+    virtual void setConfig(const OutputRendererConfig& config) = 0;
+    virtual int getOutputWidth() const = 0;
+    virtual int getOutputHeight() const = 0;
+    
+protected:
+    IOutputRendererPlugin();
+    virtual ~IOutputRendererPlugin();
+};
+
+// ============================================================================
+// STAGE 7: CONFIGURATION MANAGER PLUGIN INTERFACE
+// ============================================================================
+
+struct ConfigurationConfig {
+    std::string config_path;
+    bool auto_save_config;
+    int config_format;
+    bool enable_cloud_sync;
+    std::string cloud_sync_server;
+};
+
+class IConfigurationManagerPlugin : public IPlugin {
+public:
+    virtual ~IConfigurationManagerPlugin() = default;
+    
+    // Configuration
+    virtual bool loadConfig(const std::string& path) = 0;
+    virtual bool saveConfig(const std::string& path) = 0;
+    virtual bool validateConfig() = 0;
+    virtual bool resetConfig() = 0;
+    
+    // Cloud Sync
+    virtual bool syncWithCloud() = 0;
+    virtual bool uploadConfig() = 0;
+    virtual bool downloadConfig() = 0;
+    virtual bool isCloudSyncEnabled() const = 0;
+    
+    // Query
+    virtual bool isInitialized() const = 0;
+    virtual ConfigurationConfig getConfig() const = 0;
+    virtual void setConfig(const ConfigurationConfig& config) = 0;
+    virtual std::string getLastError() const = 0;
+    virtual int getErrorCode() const = 0;
+    
+protected:
+    IConfigurationManagerPlugin();
+    virtual ~IConfigurationManagerPlugin();
+};
+
+// ============================================================================
+// PLUGIN FACTORY INTERFACE
+// ============================================================================
+
+class IPluginFactory {
+public:
+    virtual ~IPluginFactory() = default;
+    
+    // Plugin Creation
+    virtual IPlugin* createPlugin(const std::string& plugin_type) = 0;
+    virtual bool registerPlugin(const std::string& plugin_type, IPlugin* plugin) = 0;
+    virtual bool unregisterPlugin(const std::string& plugin_type) = 0;
+    virtual std::vector<std::string> getRegisteredPlugins() const = 0;
+    
+    // Plugin Discovery
+    virtual bool discoverPlugins() = 0;
+    virtual std::vector<std::string> getAvailablePlugins() const = 0;
+    virtual std::string getPluginInfo(const std::string& plugin_type) const = 0;
+    
+    // Plugin Loading
+    virtual bool loadPlugin(const std::string& plugin_path) = 0;
+    virtual bool unloadPlugin(const std::string& plugin_type) = 0;
+    virtual bool isPluginLoaded(const std::string& plugin_type) const = 0;
+    
+    // Plugin Management
+    virtual int getLoadedPluginCount() const = 0;
+    virtual int getAvailablePluginCount() const = 0;
+    
+protected:
+    IPluginFactory();
+    virtual ~IPluginFactory();
+};
+
+// ============================================================================
+// PLUGIN MANAGER INTERFACE
+// ============================================================================
+
+class IPluginManager {
+public:
+    virtual ~IPluginManager() = default;
+    
+    // Lifecycle
+    virtual bool init() = 0;
+    virtual void shutdown() = 0;
+    
+    // Plugin Management
+    virtual bool loadPlugin(const std::string& plugin_path) = 0;
+    virtual bool unloadPlugin(const std::string& plugin_type) = 0;
+    virtual bool enablePlugin(const std::string& plugin_type) = 0;
+    virtual bool disablePlugin(const std::string& plugin_type) = 0;
+    virtual bool isPluginEnabled(const std::string& plugin_type) const = 0;
+    
+    // Query
+    virtual std::vector<std::string> getLoadedPlugins() const = 0;
+    virtual IPlugin* getPlugin(const std::string& plugin_type) const = 0;
+    virtual int getLoadedPluginCount() const = 0;
+    virtual int getEnabledPluginCount() const = 0;
+    
+    // Configuration
+    virtual bool setPluginConfig(const std::string& plugin_type, const void* config) = 0;
+    virtual void* getPluginConfig(const std::string& plugin_type) const = 0;
+    virtual bool validatePluginConfig(const std::string& plugin_type) = 0;
+    
+    // Hot-Reload
+    virtual bool hotReloadPlugin(const std::string& plugin_type) = 0;
+    virtual bool isPluginHotReloadable(const std::string& plugin_type) const = 0;
+    
+protected:
+    IPluginManager();
+    virtual ~IPluginManager();
+};
+
+// ============================================================================
+// PLUGIN REGISTRY
+// ============================================================================
+
+struct PluginRegistry {
+    static PluginRegistry& instance();
+    bool registerPlugin(const std::string& plugin_type, IPlugin* plugin);
+    bool unregisterPlugin(const std::string& plugin_type);
+    std::vector<std::string> getRegisteredPlugins() const;
+    IPlugin* getPlugin(const std::string& plugin_type) const;
+    
+private:
+    PluginRegistry();
+    ~PluginRegistry();
+    std::vector<std::pair<std::string, IPlugin*>> m_registered_plugins;
+};
+
+// ============================================================================
+// END OF plugininterfaces.hpp
+// ============================================================================
